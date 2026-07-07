@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package common.v1;
+
+option go_package = "github.com/agarwalvivek29/here.now/packages/schema/generated/go/common/v1;commonv1";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Auth types shared across all services.
+// Parsed JWT claims and API key auth results are represented here.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// AuthMethod identifies how a request was authenticated.
+enum AuthMethod {
+  AUTH_METHOD_UNSPECIFIED = 0;
+  AUTH_METHOD_JWT = 1;      // Bearer token — user or service JWT
+  AUTH_METHOD_API_KEY = 2;  // X-API-Key header — service-to-service
+}
+
+// TokenType distinguishes tokens issued for users vs internal services.
+enum TokenType {
+  TOKEN_TYPE_UNSPECIFIED = 0;
+  TOKEN_TYPE_USER = 1;     // Issued to an end user (from login flow)
+  TOKEN_TYPE_SERVICE = 2;  // Issued to an internal service (BE↔BE)
+}
+
+// AuthClaims represents the resolved identity attached to an authenticated request.
+// Middleware populates this and makes it available to handlers via context/DI.
+message AuthClaims {
+  // Subject: user ID (UUID) for user tokens, service name for service tokens
+  string subject = 1;
+
+  // How the request was authenticated
+  AuthMethod method = 2;
+
+  // Whether the token is a user token or service token
+  TokenType token_type = 3;
+
+  // Optional: role string (e.g., "admin", "member") from JWT claims
+  string role = 4;
+
+  // Optional: fine-grained permission scopes (e.g., "users:read", "orders:write")
+  repeated string scopes = 5;
+
+  // Unix timestamp — when the token was issued
+  int64 issued_at = 6;
+
+  // Unix timestamp — when the token expires (0 for API key auth, no expiry)
+  int64 expires_at = 7;
+}

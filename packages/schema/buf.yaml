@@ -1,0 +1,29 @@
+version: v2
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Buf workspace configuration for packages/schema
+#
+# This is the canonical source of ALL data models across every service.
+# See README.md for the schema-first mandate and usage guide.
+# ─────────────────────────────────────────────────────────────────────────────
+
+modules:
+  - path: proto
+
+# Proto linting: enforces Google's API style guide
+lint:
+  use:
+    - DEFAULT
+  # Allow enums without a UNSPECIFIED=0 value in common utility protos
+  except:
+    - ENUM_ZERO_VALUE_SUFFIX
+  ignore:
+    - google/
+
+# Breaking change detection: FILE level catches field removals, renames,
+# type changes, and service method signature changes.
+breaking:
+  use:
+    - FILE
+  ignore:
+    - google/

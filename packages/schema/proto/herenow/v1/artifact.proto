@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package herenow.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/agarwalvivek29/here.now/packages/schema/generated/go/herenow/v1;herenowv1";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// here.now core domain — artifacts and access grants.
+// Schema-first: these generated types are the ONLY definition of these concepts.
+// The service imports them; it never redefines an Artifact/Grant/Visibility.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Visibility controls who may view an artifact. Private is the default.
+enum Visibility {
+  VISIBILITY_UNSPECIFIED = 0;
+  VISIBILITY_PRIVATE = 1; // owner only (default)
+  VISIBILITY_INVITED = 2; // owner + explicitly invited subjects
+  VISIBILITY_ORG = 3;     // any authenticated user (optionally group-scoped)
+}
+
+// Identity is a verified principal. Sub is the immutable subject id (OIDC `sub`
+// or local user id). Grants bind to Sub, never to a mutable email.
+message Identity {
+  string sub = 1;
+  string email = 2;
+}
+
+// Artifact is the metadata for one published bundle. Bundle bytes live in the
+// blob store; this is what the metadata store persists.
+message Artifact {
+  string slug = 1;
+  string owner_sub = 2;
+  string title = 3;
+  Visibility visibility = 4;
+  string content_type = 5;
+  google.protobuf.Timestamp created_at = 6;
+}
+
+// Grant is one invitee's access to one artifact (the many-to-many relation).
+message Grant {
+  string slug = 1;
+  string grantee_sub = 2;
+  string granted_by = 3;
+  google.protobuf.Timestamp created_at = 4;
+}

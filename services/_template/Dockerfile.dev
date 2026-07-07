@@ -1,0 +1,61 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# DEVELOPMENT Dockerfile — [SERVICE_NAME]
+#
+# Hot-reload enabled. Used exclusively for local development via docker-compose.
+# For production builds, use Dockerfile.
+#
+# Source code is mounted as a volume — changes are reflected without rebuild.
+# Choose ONE language section and delete the others.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ═══════════════════ TYPESCRIPT ══════════════════════════════════════════════
+# Requires: "dev" script in package.json that runs with hot-reload
+# e.g.: "dev": "tsx watch src/main.ts" or "dev": "ts-node-dev --respawn src/main.ts"
+FROM node:22-alpine AS development
+WORKDIR /app
+RUN corepack enable pnpm
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+# Source is mounted as a docker-compose volume — no COPY needed
+EXPOSE 3000
+CMD ["pnpm", "dev"]
+
+# ═══════════════════ PYTHON ══════════════════════════════════════════════════
+# Uses FastAPI dev server (uvicorn --reload under the hood)
+FROM python:3.12-slim AS development
+WORKDIR /app
+RUN pip install uv
+COPY pyproject.toml uv.lock* ./
+RUN uv sync --frozen
+# Source is mounted as a volume
+EXPOSE 8000
+CMD ["uv", "run", "fastapi", "dev", "src/[service_name]/main.py", \
+     "--host", "0.0.0.0", "--port", "8000"]
+
+# ═══════════════════ GO ══════════════════════════════════════════════════════
+# Uses air for hot-reload: https://github.com/air-verse/air
+# Air config: .air.toml at service root (copy from docs/examples/.air.toml)
+FROM golang:1.23-alpine AS development
+WORKDIR /app
+RUN apk add --no-cache protobuf-dev
+RUN go install github.com/air-verse/air@latest
+COPY go.mod go.sum ./
+RUN go mod download
+# Source is mounted as a volume
+EXPOSE 8080
+CMD ["air"]
+
+# ════════════════���══ RUST ════════════════════════════════════════════════════
+# Uses cargo-watch for hot-reload
+FROM rust:1.82 AS development
+WORKDIR /app
+RUN apt-get update && apt-get install -y protobuf-compiler && rm -rf /var/lib/apt/lists/*
+RUN cargo install cargo-watch
+COPY Cargo.toml Cargo.lock ./
+# Pre-fetch and cache dependencies
+RUN mkdir src && echo "fn main() {}" > src/main.rs \
+  && cargo fetch \
+  && rm -rf src
+# Source is mounted as a volume
+EXPOSE 8080
+CMD ["cargo", "watch", "-x", "run"]

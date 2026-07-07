@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package common.v1;
+
+option go_package = "github.com/agarwalvivek29/here.now/packages/schema/generated/go/common/v1;commonv1";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Error types used in all service responses.
+// Import this in any proto that returns error information.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ErrorResponse is the standard error envelope returned by all services.
+// HTTP handlers should use this as the response body for 4xx/5xx responses.
+message ErrorResponse {
+  // Machine-readable error code in UPPER_SNAKE_CASE
+  // e.g., "USER_NOT_FOUND", "VALIDATION_FAILED", "UNAUTHORIZED"
+  string code = 1;
+
+  // Human-readable error message (may be shown to end users)
+  string message = 2;
+
+  // Field-level validation errors, populated when code = "VALIDATION_FAILED"
+  repeated FieldError field_errors = 3;
+}
+
+// FieldError describes a validation error for a specific request field.
+message FieldError {
+  // The field path using dot notation (e.g., "email", "address.city", "items[0].quantity")
+  string field = 1;
+
+  // Human-readable description of the validation failure
+  string message = 2;
+
+  // Machine-readable rule that was violated (e.g., "required", "min_length", "email_format")
+  string rule = 3;
+}

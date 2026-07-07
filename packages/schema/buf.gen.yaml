@@ -1,0 +1,29 @@
+version: v2
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Buf code generation for here.now.
+#
+# here.now generates Go only: the sole consumer of the domain schema is the Go
+# service (services/herenow-api). The viewer (apps/) renders opaque artifact
+# bytes and shares no domain types, so TS/Python/Rust bindings are intentionally
+# omitted. Add a language plugin here the moment a second-language consumer exists.
+#
+# To regenerate: ./scripts/generate.sh   (or, offline: buf generate)
+# ─────────────────────────────────────────────────────────────────────────────
+
+inputs:
+  - directory: proto
+
+managed:
+  enabled: true
+  override:
+    - file_option: go_package_prefix
+      value: github.com/agarwalvivek29/here.now/packages/schema/generated/go
+
+plugins:
+  # protoc-gen-go — message + enum types. Local plugin (install via
+  # `go install google.golang.org/protobuf/cmd/protoc-gen-go@latest`); no network.
+  - local: protoc-gen-go
+    out: generated/go
+    opt:
+      - paths=source_relative

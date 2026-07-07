@@ -1,0 +1,70 @@
+name: Spec Check
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  spec-check:
+    runs-on: ubuntu-latest
+    # Enforce on feature and new-service branches — branch name is set automatically,
+    # unlike labels which are easy to forget. fix/, chore/, docs/ branches are exempt.
+    if: |
+      startsWith(github.head_ref, 'feat/') ||
+      startsWith(github.head_ref, 'new-service/')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract issue number from PR
+        id: issue
+        run: |
+          # Look for issue references in PR body: "Closes #123", "Fixes #123", etc.
+          ISSUE_NUMBER=$(echo "${{ github.event.pull_request.body }}" \
+            | grep -oE '(Closes|Fixes|Resolves|Related to) #[0-9]+' \
+            | grep -oE '[0-9]+' \
+            | head -1)
+
+          if [ -z "$ISSUE_NUMBER" ]; then
+            echo "::warning::No issue reference found in PR body. Skipping spec check."
+            echo "found=false" >> $GITHUB_OUTPUT
+          else
+            echo "number=$ISSUE_NUMBER" >> $GITHUB_OUTPUT
+            echo "found=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check spec file exists
+        if: steps.issue.outputs.found == 'true'
+        run: |
+          ISSUE_NUMBER="${{ steps.issue.outputs.number }}"
+          SPEC_PATTERN="docs/specs/${ISSUE_NUMBER}-*.md"
+
+          # Check if any spec file matches the pattern
+          SPEC_FILES=$(ls $SPEC_PATTERN 2>/dev/null || true)
+
+          if [ -z "$SPEC_FILES" ]; then
+            echo "::error::No spec file found for issue #${ISSUE_NUMBER}."
+            echo "::error::Expected: docs/specs/${ISSUE_NUMBER}-[feature-name].md"
+            echo ""
+            echo "Create a spec file using docs/specs/TEMPLATE.md before merging this PR."
+            exit 1
+          else
+            echo "✓ Spec file found: $SPEC_FILES"
+          fi
+
+      - name: Check spec status is not Draft
+        if: steps.issue.outputs.found == 'true'
+        run: |
+          ISSUE_NUMBER="${{ steps.issue.outputs.number }}"
+          SPEC_FILE=$(ls docs/specs/${ISSUE_NUMBER}-*.md 2>/dev/null | head -1)
+
+          if [ -n "$SPEC_FILE" ]; then
+            # Check that the spec status is Approved or Implemented, not Draft or Review
+            STATUS=$(grep -oE 'Status: (Draft|Review|Approved|Implemented)' "$SPEC_FILE" | head -1 || true)
+
+            if echo "$STATUS" | grep -qE 'Draft|Review'; then
+              echo "::error::Spec status is '${STATUS}' — must be 'Approved' or 'Implemented' before merging."
+              exit 1
+            else
+              echo "✓ Spec status: $STATUS"
+            fi
+          fi

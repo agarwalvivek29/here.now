@@ -1,0 +1,11 @@
+# Node modules (if any JS tooling is added)
+node_modules/
+
+# Python cache
+__pycache__/
+*.pyc
+.venv/
+
+# Do NOT gitignore generated/ — we commit all generated code.
+# This ensures consumers don't need buf/protoc/betterproto installed.
+# CI validates generated code is up to date.

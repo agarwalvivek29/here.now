@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+# commit-msg hook — validates Conventional Commits format
+# Format: type(scope): description
+# Valid types: feat, fix, docs, refactor, test, chore, perf, ci
+
+. "$(dirname "$0")/_/husky.sh"
+
+npx --no -- commitlint --edit "$1"

@@ -1,0 +1,173 @@
+name: here-now
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Local Development Infrastructure
+#
+# Usage:
+#   docker compose up -d              # start everything that's uncommented
+#   docker compose up -d postgres     # start a specific service
+#   docker compose down               # stop and remove containers
+#   docker compose down -v            # also remove volumes (destroys data)
+#
+# To enable a service: uncomment its block and any volumes it references.
+# ─────────────────────────────────────────────────────────────────────────────
+
+networks:
+  app-network:
+    driver: bridge
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Volumes (uncomment as needed)
+# ─────────────────────────────────────────────────────────────────────────────
+volumes:
+  # postgres-data:
+  # mongo-data:
+  # redis-data:
+  # kafka-data:
+  # zookeeper-data:
+  # rabbitmq-data:
+
+services:
+
+  # ─── PostgreSQL ─────────────────────────────────────────────────────────────
+  # Uncomment to enable. Default credentials — change in .env for shared envs.
+  #
+  # postgres:
+  #   image: postgres:17-alpine
+  #   restart: unless-stopped
+  #   environment:
+  #     POSTGRES_USER: ${POSTGRES_USER:-postgres}
+  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+  #     POSTGRES_DB: ${POSTGRES_DB:-app}
+  #   ports:
+  #     - "${POSTGRES_PORT:-5432}:5432"
+  #   volumes:
+  #     - postgres-data:/var/lib/postgresql/data
+  #   networks:
+  #     - app-network
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+  #     interval: 5s
+  #     timeout: 5s
+  #     retries: 5
+
+  # ─── MongoDB ────────────────────────────────────────────────────────────────
+  #
+  # mongo:
+  #   image: mongo:8
+  #   restart: unless-stopped
+  #   environment:
+  #     MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-mongo}
+  #     MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-mongo}
+  #     MONGO_INITDB_DATABASE: ${MONGO_DB:-app}
+  #   ports:
+  #     - "${MONGO_PORT:-27017}:27017"
+  #   volumes:
+  #     - mongo-data:/data/db
+  #   networks:
+  #     - app-network
+  #   healthcheck:
+  #     test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+  #     interval: 5s
+  #     timeout: 5s
+  #     retries: 5
+
+  # ─── Redis ──────────────────────────────────────────────────────────────────
+  # Used for caching, sessions, and/or as a simple queue.
+  #
+  # redis:
+  #   image: redis:7-alpine
+  #   restart: unless-stopped
+  #   command: redis-server --requirepass ${REDIS_PASSWORD:-redis}
+  #   ports:
+  #     - "${REDIS_PORT:-6379}:6379"
+  #   volumes:
+  #     - redis-data:/data
+  #   networks:
+  #     - app-network
+  #   healthcheck:
+  #     test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis}", "ping"]
+  #     interval: 5s
+  #     timeout: 5s
+  #     retries: 5
+
+  # ─── Kafka ──────────────────────────────────────────────────────────────────
+  # KRaft mode (no Zookeeper). Requires Kafka 3.3+.
+  #
+  # kafka:
+  #   image: apache/kafka:3.9.0
+  #   restart: unless-stopped
+  #   environment:
+  #     KAFKA_NODE_ID: 1
+  #     KAFKA_PROCESS_ROLES: broker,controller
+  #     KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+  #     KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+  #     KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+  #     KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+  #     KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+  #     KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+  #     KAFKA_LOG_DIRS: /var/lib/kafka/data
+  #     CLUSTER_ID: ${KAFKA_CLUSTER_ID:-MkU3OEVBNTcwNTJENDM2Qk}
+  #   ports:
+  #     - "${KAFKA_PORT:-9092}:9092"
+  #   volumes:
+  #     - kafka-data:/var/lib/kafka/data
+  #   networks:
+  #     - app-network
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"]
+  #     interval: 10s
+  #     timeout: 10s
+  #     retries: 5
+  #     start_period: 30s
+
+  # ─── RabbitMQ ───────────────────────────────────────────────────────────────
+  # Includes management UI at http://localhost:15672 (guest/guest)
+  #
+  # rabbitmq:
+  #   image: rabbitmq:4-management-alpine
+  #   restart: unless-stopped
+  #   environment:
+  #     RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+  #     RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
+  #   ports:
+  #     - "${RABBITMQ_PORT:-5672}:5672"
+  #     - "${RABBITMQ_MGMT_PORT:-15672}:15672"
+  #   volumes:
+  #     - rabbitmq-data:/var/lib/rabbitmq
+  #   networks:
+  #     - app-network
+  #   healthcheck:
+  #     test: ["CMD", "rabbitmq-diagnostics", "ping"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+
+  # ─── Application Services ───────────────────────────────────────────────────
+  # Add your application service stubs here.
+  # Run `./scripts/new-service.sh` to scaffold a service — it adds the stub for you.
+  #
+  # Always use `Dockerfile.dev` (not `Dockerfile`) for local development.
+  # Dockerfile.dev has hot-reload enabled and is optimized for fast iteration.
+  # Dockerfile is for production builds only.
+  #
+  # Example:
+  # my-service:
+  #   build:
+  #     context: ../services/my-service
+  #     dockerfile: Dockerfile.dev     # ← always Dockerfile.dev for local dev
+  #   restart: unless-stopped
+  #   env_file:
+  #     - ../services/my-service/.env
+  #   environment:
+  #     DATABASE_URL: postgresql://postgres:postgres@postgres:5432/app
+  #   ports:
+  #     - "3001:3000"
+  #   volumes:
+  #     - ../services/my-service/src:/app/src          # hot reload — source
+  #     - ../packages/schema/generated:/schema/generated # schema types read-only
+  #   networks:
+  #     - app-network
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy

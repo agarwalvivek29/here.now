@@ -1,0 +1,6 @@
+go 1.26.3
+
+use (
+	./packages/schema/generated/go
+	./services/herenow-api
+)

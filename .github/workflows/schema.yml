@@ -1,0 +1,73 @@
+name: Schema
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # needed for buf breaking comparison
+
+      # ─── Install buf ──────────────────────────────────────────────────────
+      - uses: bufbuild/buf-setup-action@v1
+        with:
+          version: latest
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      # ─── Install Go proto plugins ─────────────────────────────────────────
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+
+      - name: Install Go protoc plugins
+        run: |
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+
+      # ─── Install Python betterproto ───────────────────────────────────────
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install betterproto
+        run: pip install "betterproto[compiler]"
+
+      # ─── Lint proto files ─────────────────────────────────────────────────
+      - name: buf lint
+        working-directory: packages/schema
+        run: buf lint
+
+      # ─── Breaking change detection (PRs only) ─────────────────────────────
+      - name: buf breaking
+        if: github.event_name == 'pull_request'
+        working-directory: packages/schema
+        run: |
+          buf breaking \
+            --against "https://github.com/${{ github.repository }}.git#branch=main,subdir=packages/schema"
+        continue-on-error: false
+
+      # ─── Verify generated code is up to date ─────────────────────────────
+      - name: Regenerate and check for diff
+        working-directory: packages/schema
+        run: |
+          buf generate
+
+          if ! git diff --quiet; then
+            echo "::error::Generated code in packages/schema/generated/ is out of date."
+            echo ""
+            echo "Run the following locally and commit the result:"
+            echo "  cd packages/schema && ./scripts/generate.sh"
+            echo ""
+            echo "Changed files:"
+            git diff --name-only
+            exit 1
+          fi
+
+          echo "✓ Generated code is up to date"

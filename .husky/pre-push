@@ -1,0 +1,19 @@
+#!/usr/bin/env sh
+# pre-push hook — runs before each push
+# Blocks direct pushes to main/master — all changes must go through a PR
+
+. "$(dirname "$0")/_/husky.sh"
+
+PROTECTED_BRANCHES="^(main|master)$"
+
+while read local_ref local_sha remote_ref remote_sha; do
+  remote_branch=$(echo "$remote_ref" | sed 's|refs/heads/||')
+  if echo "$remote_branch" | grep -qE "$PROTECTED_BRANCHES"; then
+    echo "✗ Direct push to '$remote_branch' is not allowed."
+    echo "  All changes must go through a Pull Request."
+    echo "  Create a feature branch and open a PR instead."
+    exit 1
+  fi
+done
+
+exit 0

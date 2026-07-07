@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+package common.v1;
+
+option go_package = "github.com/agarwalvivek29/here.now/packages/schema/generated/go/common/v1;commonv1";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pagination types used by all list endpoints.
+// Import this in any proto that returns paginated results.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// PaginationRequest is the standard input for list endpoints.
+message PaginationRequest {
+  // 1-based page number. Defaults to 1 if not provided.
+  int32 page = 1;
+
+  // Number of items per page. Defaults to 20. Max 100.
+  int32 page_size = 2;
+
+  // Optional sort field name (e.g., "created_at", "name")
+  string sort_by = 3;
+
+  // Sort direction. Defaults to "asc".
+  SortOrder sort_order = 4;
+}
+
+// SortOrder specifies the direction of sorting in list requests.
+enum SortOrder {
+  SORT_ORDER_UNSPECIFIED = 0;
+  SORT_ORDER_ASC = 1;
+  SORT_ORDER_DESC = 2;
+}
+
+// PaginationMeta is included in all list responses.
+// Use this alongside the repeated results field.
+message PaginationMeta {
+  // Current page number (mirrors the request)
+  int32 page = 1;
+
+  // Items per page as returned (may be less than requested on the last page)
+  int32 page_size = 2;
+
+  // Total number of items matching the query across all pages
+  int32 total = 3;
+
+  // Total number of pages: ceil(total / page_size)
+  int32 total_pages = 4;
+
+  // Whether there is a next page available
+  bool has_next = 5;
+
+  // Whether there is a previous page available
+  bool has_prev = 6;
+}
