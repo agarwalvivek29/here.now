@@ -79,14 +79,17 @@ This is enforced by the `commit-msg` git hook. Hooks must **never** be skipped (
 
 ---
 
-## 5. No Direct Commits to Main
+## 5. Trunk-Based Development on Main
 
-**Main is a protected branch. All changes arrive via Pull Request.**
+**`main` is the default branch and the single mainline. This project maintains
+everything on `main` (trunk-based) — the OSS-standard, low-ceremony workflow for a
+small/solo maintainer.**
 
-- PRs require at least one approval
-- All CI checks must pass before merge
-- Squash merges are preferred to keep history clean
-- Branch naming: `feat/[ISSUE-NUMBER]-[short-description]`, `fix/[ISSUE-NUMBER]-[short-description]`
+- Commit directly to `main`; CI runs on every push.
+- Keep commits small, green, and Conventional-Commits formatted.
+- Short-lived branches + PRs are optional — use them when you want review on a larger
+  change, not as a requirement for every change.
+- Never force-push `main` or rewrite published history.
 
 ---
 

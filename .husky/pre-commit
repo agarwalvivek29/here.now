@@ -1,17 +1,10 @@
-#!/usr/bin/env sh
-# pre-commit hook — runs before each commit
-# Enforces: lint and format checks on staged files
-# Auto-regenerates proto bindings when .proto files are staged
-
-. "$(dirname "$0")/_/husky.sh"
+# pre-commit hook — lint/format staged files; auto-regenerate proto bindings.
 
 # ── Proto regeneration ────────────────────────────────────────────────────────
 STAGED_PROTOS=$(git diff --cached --name-only | grep '\.proto$' || true)
-
 if [ -n "$STAGED_PROTOS" ]; then
   echo "▶ Proto files staged — regenerating bindings..."
-  cd packages/schema && ./scripts/generate.sh --skip-breaking
-  cd - > /dev/null
+  (cd packages/schema && ./scripts/generate.sh --skip-breaking)
   git add packages/schema/generated/
   echo "✓ Generated files auto-staged"
 fi

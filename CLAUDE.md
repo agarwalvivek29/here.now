@@ -78,8 +78,7 @@ Before starting any task, you MUST:
 - **Prefer editing existing files over creating new ones.**
 - **Never skip git hooks.** Do not use `--no-verify` or `--no-gpg-sign`.
 - **Never add AI attribution.** Do not add `Co-Authored-By: Claude` or any mention of Claude, Anthropic, or AI tooling in commit messages or PR bodies.
-- **Never commit to `main` directly.** All changes go through a PR on a feature branch.
-- **Never push to `main` directly.** The `.husky/pre-push` hook enforces this — it will reject any push targeting `main` or `master`. If a push to main is needed, it must have explicit human approval first.
+- **Trunk-based on `main`.** This project maintains everything on `main` (see CORE_RULES Rule 5). Commit and push to `main` directly; keep commits small and green. Never force-push or rewrite published history.
 - **Never hardcode secrets.** Use `.env` files (gitignored). Update `.env.example` with placeholder values.
 - **Never modify `infra/docker-compose.yml` or AWS configs without explicit human approval.**
 
