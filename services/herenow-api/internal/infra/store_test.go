@@ -67,3 +67,52 @@ func TestFileStoreRoundTrip(t *testing.T) {
 		t.Fatalf("grant round-trip mismatch: %+v", grants[0])
 	}
 }
+
+// TestListByGrantee verifies the grants→artifacts join: a grantee sees a
+// granted artifact, a non-grantee sees nothing, and multiple grants for the
+// same slug dedupe to a single artifact.
+func TestListByGrantee(t *testing.T) {
+	s, err := NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+
+	art := &herenowv1.Artifact{
+		Slug:       "shared-doc",
+		OwnerSub:   "owner-1",
+		Visibility: herenowv1.Visibility_VISIBILITY_INVITED,
+	}
+	if err := s.PutArtifact(art); err != nil {
+		t.Fatalf("PutArtifact: %v", err)
+	}
+	// Two grants to the same grantee on the same slug — must dedupe.
+	for i := 0; i < 2; i++ {
+		if err := s.AddGrant(&herenowv1.Grant{Slug: "shared-doc", GranteeSub: "grantee-1", GrantedBy: "owner-1"}); err != nil {
+			t.Fatalf("AddGrant: %v", err)
+		}
+	}
+	// A dangling grant to a nonexistent artifact must be skipped.
+	if err := s.AddGrant(&herenowv1.Grant{Slug: "ghost", GranteeSub: "grantee-1", GrantedBy: "owner-1"}); err != nil {
+		t.Fatalf("AddGrant: %v", err)
+	}
+
+	got, err := s.ListByGrantee("grantee-1")
+	if err != nil {
+		t.Fatalf("ListByGrantee: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("grantee expected 1 deduped artifact, got %d", len(got))
+	}
+	if got[0].GetSlug() != "shared-doc" {
+		t.Fatalf("expected shared-doc, got %q", got[0].GetSlug())
+	}
+
+	// A user with no grants sees nothing.
+	none, err := s.ListByGrantee("stranger")
+	if err != nil {
+		t.Fatalf("ListByGrantee stranger: %v", err)
+	}
+	if len(none) != 0 {
+		t.Fatalf("non-grantee expected 0 artifacts, got %d", len(none))
+	}
+}

@@ -123,6 +123,33 @@ func (s *FileStore) ListByOwner(sub string) ([]*herenowv1.Artifact, error) {
 	return out, nil
 }
 
+// ListByGrantee returns the deduped set of artifacts shared with sub via a
+// Grant. It joins grants→artifacts: a slug is included only if a grant names
+// sub as grantee AND the artifact still exists. This is strictly grant-based
+// "shared with me" — the caller's own artifacts are NOT included implicitly.
+func (s *FileStore) ListByGrantee(sub string) ([]*herenowv1.Artifact, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []*herenowv1.Artifact
+	seen := map[string]struct{}{}
+	for _, g := range s.grants {
+		if g.GetGranteeSub() != sub {
+			continue
+		}
+		slug := g.GetSlug()
+		if _, dup := seen[slug]; dup {
+			continue
+		}
+		a, ok := s.arts[slug]
+		if !ok {
+			continue // dangling grant — artifact deleted
+		}
+		seen[slug] = struct{}{}
+		out = append(out, a)
+	}
+	return out, nil
+}
+
 func (s *FileStore) AddGrant(g *herenowv1.Grant) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
