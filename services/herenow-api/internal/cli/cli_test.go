@@ -74,3 +74,88 @@ func TestPublishRemoteErrorsOnNon201(t *testing.T) {
 		t.Fatalf("publishRemote: expected error on 401, got nil")
 	}
 }
+
+// TestSetVisibilityRemoteSendsBearerAndPatch verifies the visibility helper
+// PATCHes the right path with the Bearer token and the requested visibility.
+func TestSetVisibilityRemoteSendsBearerAndPatch(t *testing.T) {
+	const token = "id-token-xyz"
+	const slug = "abc123"
+
+	var gotMethod, gotPath, gotAuth string
+	var gotBody struct {
+		Visibility string `json:"visibility"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	if err := setVisibilityRemote(srv.URL, token, slug, "invited"); err != nil {
+		t.Fatalf("setVisibilityRemote: %v", err)
+	}
+	if gotMethod != http.MethodPatch {
+		t.Fatalf("method = %q, want PATCH", gotMethod)
+	}
+	if want := "/artifacts/" + slug + "/visibility"; gotPath != want {
+		t.Fatalf("path = %q, want %q", gotPath, want)
+	}
+	if gotAuth != "Bearer "+token {
+		t.Fatalf("Authorization = %q, want %q", gotAuth, "Bearer "+token)
+	}
+	if gotBody.Visibility != "invited" {
+		t.Fatalf("visibility = %q, want invited", gotBody.Visibility)
+	}
+}
+
+// TestAddGrantRemoteSendsBearerAndPost verifies the grant helper POSTs the right
+// path with the Bearer token and the grantee subject.
+func TestAddGrantRemoteSendsBearerAndPost(t *testing.T) {
+	const token = "id-token-xyz"
+	const slug = "abc123"
+
+	var gotMethod, gotPath, gotAuth string
+	var gotBody struct {
+		GranteeSub string `json:"grantee_sub"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+
+	if err := addGrantRemote(srv.URL, token, slug, "local:friend"); err != nil {
+		t.Fatalf("addGrantRemote: %v", err)
+	}
+	if gotMethod != http.MethodPost {
+		t.Fatalf("method = %q, want POST", gotMethod)
+	}
+	if want := "/artifacts/" + slug + "/grants"; gotPath != want {
+		t.Fatalf("path = %q, want %q", gotPath, want)
+	}
+	if gotAuth != "Bearer "+token {
+		t.Fatalf("Authorization = %q, want %q", gotAuth, "Bearer "+token)
+	}
+	if gotBody.GranteeSub != "local:friend" {
+		t.Fatalf("grantee_sub = %q, want local:friend", gotBody.GranteeSub)
+	}
+}
+
+// TestSetVisibilityRemoteErrorsOnNon200 confirms a non-200 response surfaces as
+// an error rather than being silently swallowed.
+func TestSetVisibilityRemoteErrorsOnNon200(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "nope", http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	if err := setVisibilityRemote(srv.URL, "tok", "slug", "invited"); err == nil {
+		t.Fatalf("setVisibilityRemote: expected error on 404, got nil")
+	}
+}
