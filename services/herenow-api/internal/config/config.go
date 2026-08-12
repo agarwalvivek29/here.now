@@ -17,6 +17,9 @@ type Config struct {
 	Token   string `json:"token"`
 	Sub     string `json:"sub"`
 	Email   string `json:"email"`
+	// OIDC settings are loaded for later use; OIDC is not wired up yet.
+	OIDCIssuer   string `json:"oidc_issuer"`
+	OIDCClientID string `json:"oidc_client_id"`
 }
 
 func (c Config) Identity() *herenowv1.Identity {
@@ -46,6 +49,7 @@ func Load() (Config, error) {
 	b, err := os.ReadFile(Path())
 	if err != nil {
 		if os.IsNotExist(err) {
+			applyEnv(&c)
 			return c, nil
 		}
 		return c, err
@@ -53,7 +57,26 @@ func Load() (Config, error) {
 	if err := json.Unmarshal(b, &c); err != nil {
 		return c, err
 	}
+	applyEnv(&c)
 	return c, nil
+}
+
+// applyEnv overrides config fields from ARTIFACTA_-prefixed environment
+// variables. An env var only wins when it is set and non-empty, so unset
+// vars leave the file/default values untouched.
+func applyEnv(c *Config) {
+	setFromEnv("ARTIFACTA_ADDR", &c.Addr)
+	setFromEnv("ARTIFACTA_BASE_URL", &c.BaseURL)
+	setFromEnv("ARTIFACTA_DATA_DIR", &c.DataDir)
+	setFromEnv("ARTIFACTA_OIDC_ISSUER", &c.OIDCIssuer)
+	setFromEnv("ARTIFACTA_OIDC_CLIENT_ID", &c.OIDCClientID)
+}
+
+// setFromEnv writes the value of env var key into dst only when it is non-empty.
+func setFromEnv(key string, dst *string) {
+	if v := os.Getenv(key); v != "" {
+		*dst = v
+	}
 }
 
 func Save(c Config) error {
