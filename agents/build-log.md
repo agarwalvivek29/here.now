@@ -29,46 +29,51 @@
 
 ## Findings
 
-- **F-1 (open) — `CanView` grants are not slug-scoped.** `domain.CanView` matches a grant on
-  `grantee_sub` only, never comparing `grant.slug` to `artifact.slug`. **Not exploitable
-  today** — the server passes `Store.Grants(slug)` (already slug-filtered) — but it is a
-  missing defense-in-depth check. Documented by `TestCanView_notSlugScoped` (PR #3). Fixed in
-  **W2-T1** (add slug check + flip the test).
+- **F-1 (RESOLVED, PR #5)** — `CanView` grants were not slug-scoped. Fixed: `CanView` now
+  matches grantee AND slug (defense-in-depth). Was never exploitable (server pre-filters).
+
+## Open notes / carried debt
+
+- **maxBytes** middleware (PR #8) is defined + tested but **not yet wired to a route** — no
+  upload route exists until the publish API. Wire it there (FR1). Rate-limit IS live on
+  `/a/{slug}` + `/a/{slug}/raw` (120/min per IP).
 
 ## Waves
 
 ### Wave 1 — zero-dependency P0 foundation — **MERGED ✓**
 
-| Task                                     | FR              | PR  | Status |
-| ---------------------------------------- | --------------- | --- | ------ |
-| W1-T1 `CanView` unit tests               | FR29            | #3  | merged |
-| W1-T2 streaming `Blob` (`io.ReadCloser`) | FR23 (ADR-0005) | #1  | merged |
-| W1-T3 atomic metadata writes             | FR24            | #2  | merged |
-| W1-T4 env-var config (`ARTIFACTA_`)      | FR25 (partial)  | #4  | merged |
+| Task                                     | FR             | PR  |
+| ---------------------------------------- | -------------- | --- |
+| W1-T1 `CanView` + `NewSlug` unit tests   | FR29           | #3  |
+| W1-T2 streaming `Blob` (`io.ReadCloser`) | FR23           | #1  |
+| W1-T3 atomic metadata writes             | FR24           | #2  |
+| W1-T4 env-var config (`ARTIFACTA_`)      | FR25 (partial) | #4  |
 
-Integration: `go build ./...` + `go test ./...` green on merged `main` (config/domain/infra).
+### Wave 2 — hardening + dashboard/data foundation — **MERGED ✓**
 
-### Wave 2 — hardening + dashboard/data foundation (file-disjoint) — **in progress**
+| Task                                              | FR        | PR  |
+| ------------------------------------------------- | --------- | --- |
+| W2-T1 slug-scope `CanView` (fixes F-1)            | FR10/FR29 | #5  |
+| W2-T2 `ListByGrantee` + `ListVisibleTo`           | FR18 (D1) | #6  |
+| W2-T3 audit-integrity verifier (`audit verify`)   | FR21      | #7  |
+| W2-T4 rate-limit content routes + body-size guard | FR31      | #8  |
 
-| Task                                           | FR        | Files                                                         | Infra-gated |
-| ---------------------------------------------- | --------- | ------------------------------------------------------------- | ----------- |
-| W2-T1 slug-scope `CanView` (fixes F-1)         | FR10/FR29 | `internal/domain/authz.go`, `authz_test.go`                   | no          |
-| W2-T2 `ListByGrantee` + `ListVisibleTo`        | FR18 (D1) | `internal/infra/store.go`, `internal/domain/list.go` (new)    | no          |
-| W2-T3 audit-integrity verifier CLI             | FR21      | `internal/infra/audit_verify.go` (new), `internal/cli/cli.go` | no          |
-| W2-T4 upload size limit + rate-limit on `/raw` | FR31      | `internal/api/server.go` (+ new middleware)                   | no          |
+Integration after each wave: `go build ./...` + `go test ./...` green (api/config/domain/infra).
 
-### Later waves (indicative — composed off updated `main` as deps clear)
+### Wave 3 — infra-gated P0 core (candidate, pending sequencing) — **not started**
 
-- OIDC browser SSO (FR6) + CLI loopback-PKCE (FR7) [infra-gated] → `share`/grants (FR12/13)
-  → dashboard (FR18/19) → login page.
-- Separate content origin (FR16) + render-parity harness (FR15) [infra-gated].
-- Deploy: docker-compose + TLS + metrics/logging (FR25–27) [infra-gated].
-- Publish API (FR1) + CLI (FR2) + Skill (FR4); security gate (FR30/32).
+- Publish API `POST /artifacts` (FR1) + CLI publish-over-API + Skill (FR2/FR4) [mock auth].
+- OIDC browser SSO scaffolding (FR6) + CLI loopback-PKCE (FR7) [mock issuer/JWKS].
+- `share`/grants routes (FR12/13) → dashboard Mine/Shared/Org (FR18/19) → login page.
+- Separate cookieless content origin wiring (FR16, ADR-0008).
+- Render-parity harness (FR15, ADR-0010 — bundle-at-publish leading) [vs real artifacts].
+- Deploy: docker-compose + TLS + real /metrics + structured logging (FR25–27).
+- ARCHITECTURE.md constraint update for VPN (ADR-0011 action item).
 
 ## Log
 
-- **2026-08-12** — Reconciled branches: folded `astra-v2` into `main` (ADR-0003). Wrote ADRs
-  0003–0012 + index.
-- **2026-08-12** — **Wave 1 dispatched** (4 parallel worktree agents) → PRs #1–#4, all
-  reviewed + squash-merged into `main`, integration green. Cleaned worktrees/branches.
-  Recorded finding **F-1** (CanView slug-scoping). **Wave 2 dispatched** (W2-T1..T4).
+- **2026-08-12** — Folded `astra-v2` into `main` (ADR-0003); wrote ADRs 0003–0012 + index.
+- **2026-08-12** — **Wave 1** dispatched (4 worktree agents) → PRs #1–#4, reviewed +
+  squash-merged, integration green. Finding F-1 recorded.
+- **2026-08-12** — **Wave 2** dispatched → PRs #5–#8, reviewed + squash-merged, integration
+  green. F-1 resolved (#5). Wave 3 (infra-gated core) planned; paused for sequencing.
