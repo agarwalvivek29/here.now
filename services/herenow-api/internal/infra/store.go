@@ -150,6 +150,21 @@ func (s *FileStore) ListByGrantee(sub string) ([]*herenowv1.Artifact, error) {
 	return out, nil
 }
 
+// ListByVisibility returns every artifact whose visibility equals v. It backs
+// the dashboard's Org tab (ListByVisibility(ORG)); the caller is responsible for
+// any further filtering (e.g. excluding its own artifacts).
+func (s *FileStore) ListByVisibility(v herenowv1.Visibility) ([]*herenowv1.Artifact, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []*herenowv1.Artifact
+	for _, a := range s.arts {
+		if a.GetVisibility() == v {
+			out = append(out, a)
+		}
+	}
+	return out, nil
+}
+
 func (s *FileStore) AddGrant(g *herenowv1.Grant) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
