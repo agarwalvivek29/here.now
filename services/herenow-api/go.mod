@@ -4,7 +4,11 @@ go 1.26.3
 
 require (
 	github.com/agarwalvivek29/here.now/packages/schema/generated/go v0.0.0
+	github.com/coreos/go-oidc/v3 v3.20.0
+	golang.org/x/oauth2 v0.36.0
 	google.golang.org/protobuf v1.36.11
 )
+
+require github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 
 replace github.com/agarwalvivek29/here.now/packages/schema/generated/go => ../../packages/schema/generated/go

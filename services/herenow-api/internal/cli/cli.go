@@ -4,10 +4,12 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	herenowv1 "github.com/agarwalvivek29/here.now/packages/schema/generated/go/herenow/v1"
 	"github.com/agarwalvivek29/here.now/services/herenow-api/internal/api"
@@ -182,10 +184,25 @@ func serve() error {
 	if err != nil {
 		return err
 	}
-	srv := &api.Server{
-		Store: st,
-		Blob:  bl,
-		Auth:  &api.Local{Token: c.Token, ID: c.Identity()},
+	srv := &api.Server{Store: st, Blob: bl}
+	// Config-driven auth selection: OIDC browser SSO when configured (ADR-0007),
+	// otherwise the Local single-token adapter for zero-dependency/dev deploys.
+	if c.OIDCEnabled() {
+		if c.SessionSecret == "" {
+			return fmt.Errorf("OIDC configured but ARTIFACTA_SESSION_SECRET is empty — set it to key session cookies")
+		}
+		secure := strings.HasPrefix(strings.ToLower(c.BaseURL), "https://")
+		p, err := api.NewOIDCProvider(context.Background(),
+			c.OIDCIssuer, c.OIDCClientID, c.OIDCClientSecret, c.OIDCRedirectURL, c.SessionSecret, secure)
+		if err != nil {
+			return fmt.Errorf("oidc setup: %w", err)
+		}
+		srv.Auth = p
+		srv.OIDC = p
+		fmt.Printf("auth: oidc browser sso (issuer %s)\n", c.OIDCIssuer)
+	} else {
+		srv.Auth = &api.Local{Token: c.Token, ID: c.Identity()}
+		fmt.Printf("auth: local single-token adapter\n")
 	}
 	fmt.Printf("here.now serving on %s  (base URL %s)\n", c.Addr, c.BaseURL)
 	return http.ListenAndServe(c.Addr, srv.Routes())
