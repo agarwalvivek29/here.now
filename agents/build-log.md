@@ -53,14 +53,14 @@
 | audit-integrity verifier        | FR21    | #7  |
 | rate-limit + body-size guard    | FR31    | #8  |
 
-### Wave 3 — identity + publish core (infra-gated) — **in progress**
+### Wave 3 — identity + publish core (infra-gated) — **MERGED ✓**
 
 | Task                                             | FR      | PR  | Status   |
 | ------------------------------------------------ | ------- | --- | -------- |
 | `artifacta-publish` Skill                        | FR4     | #9  | merged ✓ |
 | OIDC browser SSO (mock issuer)                   | FR6     | #10 | merged ✓ |
 | publish API `POST /artifacts` (+ maxBytes wired) | FR1     | #11 | merged ✓ |
-| CLI loopback login + publish-over-API (Bearer)   | FR2/FR7 | —   | building |
+| CLI loopback login + publish-over-API (Bearer)   | FR2/FR7 | #12 | merged ✓ |
 
 Also merged: ARCHITECTURE.md VPN constraint update (ADR-0011 action item).
 
@@ -80,5 +80,7 @@ Also merged: ARCHITECTURE.md VPN constraint update (ADR-0011 action item).
 - **2026-08-12** — Wave 2 → PRs #5–#8 merged (green). F-1 resolved (#5).
 - **2026-08-12** — ARCHITECTURE.md VPN update (a7eae4c). Wave 3: Skill #9, OIDC SSO #10,
   publish API #11 merged (each reviewed incl. independent build/test; auth code diff-reviewed
-  for fail-closed + JWKS verify + empty-secret guard). maxBytes debt cleared (#11). CLI-client
-  (W3-T3) dispatched with id_token-as-Bearer design.
+  for fail-closed + JWKS verify + empty-secret guard). maxBytes debt cleared (#11).
+- **2026-08-12** — CLI-client #12 merged: server `Identify` accepts `Bearer` id_token (JWKS-
+  verified, fail-closed); CLI loopback login + publish-over-API. **Wave 3 COMPLETE** (identity
+  - publish core). Paused at wave boundary for direction on Wave 4 (UI/RBAC + render-parity).
