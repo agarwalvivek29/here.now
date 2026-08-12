@@ -6,6 +6,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
@@ -36,6 +37,8 @@ const usage = `here.now — self-hostable host for AI-generated artifacts
 Usage:
   herenow login             set up your local identity + session token
   herenow publish <file>    publish an artifact, print its link
+  herenow share <slug> <grantee-sub>
+                            share an artifact with a subject (sets visibility to invited)
   herenow ls                list your artifacts
   herenow serve             run the viewer server
   herenow audit verify      verify the audit-log hash chain
@@ -53,6 +56,8 @@ func Run(args []string) error {
 		return login()
 	case "publish":
 		return publish(args[1:])
+	case "share":
+		return share(args[1:])
 	case "ls":
 		return ls()
 	case "serve":
@@ -337,6 +342,119 @@ func publishRemote(baseURL, token, path string) (string, error) {
 		return "", fmt.Errorf("decode publish response: %w", err)
 	}
 	return out.URL, nil
+}
+
+// share grants a subject access to an artifact (FR12, FR13). A PRIVATE artifact
+// ignores grants, so sharing first flips visibility to INVITED and then records
+// the grant. Remote mode drives the two owner-only API endpoints with the stored
+// Bearer token; local mode does the equivalent directly against the local store.
+func share(args []string) error {
+	if len(args) < 2 {
+		return fmt.Errorf("usage: herenow share <slug> <grantee-sub>")
+	}
+	slug, grantee := args[0], args[1]
+	c, err := config.Load()
+	if err != nil {
+		return err
+	}
+
+	// Remote API mode: PATCH visibility→invited, then POST the grant.
+	if c.BaseURL != "" && c.AccessToken != "" {
+		if err := setVisibilityRemote(c.BaseURL, c.AccessToken, slug, "invited"); err != nil {
+			return err
+		}
+		if err := addGrantRemote(c.BaseURL, c.AccessToken, slug, grantee); err != nil {
+			return err
+		}
+		fmt.Printf("shared %s with %s\n", slug, grantee)
+		return nil
+	}
+
+	// Local dev mode: mutate the local store directly.
+	if c.Sub == "" {
+		return fmt.Errorf("not logged in — run: herenow login")
+	}
+	st, _, err := open(c)
+	if err != nil {
+		return err
+	}
+	art, ok, err := st.GetArtifact(slug)
+	if err != nil {
+		return err
+	}
+	if !ok || art.GetOwnerSub() != c.Sub {
+		return fmt.Errorf("no such artifact: %s", slug)
+	}
+	art.Visibility = herenowv1.Visibility_VISIBILITY_INVITED
+	if err := st.PutArtifact(art); err != nil {
+		return err
+	}
+	if err := st.AddGrant(&herenowv1.Grant{
+		Slug: slug, GranteeSub: grantee, GrantedBy: c.Sub, CreatedAt: timestamppb.Now(),
+	}); err != nil {
+		return err
+	}
+	_ = st.Append(&herenowv1.AuditEvent{
+		Ts: timestamppb.Now(), PrincipalSub: c.Sub, Slug: slug,
+		Action: herenowv1.AuditAction_AUDIT_ACTION_SHARE, Allowed: true,
+	})
+	fmt.Printf("shared %s with %s\n", slug, grantee)
+	return nil
+}
+
+// setVisibilityRemote PATCHes <baseURL>/artifacts/<slug>/visibility with the
+// requested visibility and `Authorization: Bearer <token>`. Unit-testable
+// against an httptest.Server.
+func setVisibilityRemote(baseURL, token, slug, visibility string) error {
+	endpoint := strings.TrimSuffix(baseURL, "/") + "/artifacts/" + url.PathEscape(slug) + "/visibility"
+	body, err := json.Marshal(map[string]string{"visibility": visibility})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequest(http.MethodPatch, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("set-visibility failed: %s: %s", resp.Status, strings.TrimSpace(string(b)))
+	}
+	return nil
+}
+
+// addGrantRemote POSTs a grant to <baseURL>/artifacts/<slug>/grants with
+// `Authorization: Bearer <token>`. Unit-testable against an httptest.Server.
+func addGrantRemote(baseURL, token, slug, grantee string) error {
+	endpoint := strings.TrimSuffix(baseURL, "/") + "/artifacts/" + url.PathEscape(slug) + "/grants"
+	body, err := json.Marshal(map[string]string{"grantee_sub": grantee})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("add-grant failed: %s: %s", resp.Status, strings.TrimSpace(string(b)))
+	}
+	return nil
 }
 
 func ls() error {

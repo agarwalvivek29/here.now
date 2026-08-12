@@ -23,6 +23,7 @@ type Store interface {
 	GetArtifact(slug string) (*herenowv1.Artifact, bool, error)
 	PutArtifact(a *herenowv1.Artifact) error
 	Grants(slug string) ([]*herenowv1.Grant, error)
+	AddGrant(g *herenowv1.Grant) error
 	Append(ev *herenowv1.AuditEvent) error
 }
 
@@ -77,6 +78,12 @@ func (s *Server) Routes() http.Handler {
 	// and rate-limited per client IP like the other content routes.
 	const maxPublishBytes = 25 << 20 // 25 MiB
 	mux.Handle("POST /artifacts", rateLimit(maxBytes(http.HandlerFunc(s.publish), maxPublishBytes), contentPerMinute))
+
+	// Sharing (FR12, FR13): owner-only mutations. Both fail closed — an
+	// unauthenticated caller gets 401 and a non-owner (or unknown slug) gets a
+	// 404 that never distinguishes "missing" from "not yours".
+	mux.Handle("POST /artifacts/{slug}/grants", rateLimit(http.HandlerFunc(s.addGrant), contentPerMinute))
+	mux.Handle("PATCH /artifacts/{slug}/visibility", rateLimit(http.HandlerFunc(s.setVisibility), contentPerMinute))
 	return mux
 }
 
@@ -206,6 +213,117 @@ func (s *Server) publish(w http.ResponseWriter, r *http.Request) {
 		"slug": slug,
 		"url":  s.BaseURL + "/a/" + slug,
 	})
+}
+
+// ownedArtifact resolves the artifact at slug for an owner-only mutation. It
+// enforces the two fail-closed gates shared by the sharing endpoints: the
+// caller must be authenticated (else 401) and must own the artifact (else 404).
+// A missing artifact and a non-owner caller are deliberately indistinguishable —
+// the 404 leaks neither existence nor authorization, mirroring the raw handler.
+// The returned bool reports whether the caller may proceed; when false the
+// response has already been written.
+func (s *Server) ownedArtifact(w http.ResponseWriter, r *http.Request, slug string) (*herenowv1.Artifact, *herenowv1.Identity, bool) {
+	who, ok := s.Auth.Identify(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized) // don't leak anything
+		return nil, nil, false
+	}
+	art, found, err := s.Store.GetArtifact(slug)
+	if err != nil {
+		http.Error(w, "unavailable", http.StatusInternalServerError)
+		return nil, nil, false
+	}
+	if !found || art.GetOwnerSub() != who.GetSub() {
+		http.NotFound(w, r) // missing and forbidden look identical
+		return nil, nil, false
+	}
+	return art, who, true
+}
+
+// addGrant (FR12) grants a subject access to an artifact. Owner-only. The
+// grantee subject comes from the JSON body {"grantee_sub":"..."} or a ?grantee=
+// query param. A SHARE audit event is written on success. Returns 201.
+func (s *Server) addGrant(w http.ResponseWriter, r *http.Request) {
+	slug := r.PathValue("slug")
+	_, who, ok := s.ownedArtifact(w, r, slug)
+	if !ok {
+		return
+	}
+
+	grantee := r.URL.Query().Get("grantee")
+	if grantee == "" {
+		var body struct {
+			GranteeSub string `json:"grantee_sub"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
+			grantee = body.GranteeSub
+		}
+	}
+	if grantee == "" {
+		http.Error(w, "missing grantee", http.StatusBadRequest)
+		return
+	}
+
+	g := &herenowv1.Grant{
+		Slug:       slug,
+		GranteeSub: grantee,
+		GrantedBy:  who.GetSub(),
+		CreatedAt:  timestamppb.Now(),
+	}
+	if err := s.Store.AddGrant(g); err != nil {
+		http.Error(w, "unavailable", http.StatusInternalServerError)
+		return
+	}
+	s.audit(who, slug, herenowv1.AuditAction_AUDIT_ACTION_SHARE, true)
+	w.WriteHeader(http.StatusCreated)
+}
+
+// setVisibility (FR13) changes an artifact's visibility. Owner-only. The body is
+// {"visibility":"private|invited|org"}; an unknown value is rejected with 400. A
+// SHARE audit event is written on success. Returns 200.
+func (s *Server) setVisibility(w http.ResponseWriter, r *http.Request) {
+	slug := r.PathValue("slug")
+	art, who, ok := s.ownedArtifact(w, r, slug)
+	if !ok {
+		return
+	}
+
+	var body struct {
+		Visibility string `json:"visibility"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	vis, ok := parseVisibility(body.Visibility)
+	if !ok {
+		http.Error(w, "unknown visibility", http.StatusBadRequest)
+		return
+	}
+
+	art.Visibility = vis
+	if err := s.Store.PutArtifact(art); err != nil {
+		http.Error(w, "unavailable", http.StatusInternalServerError)
+		return
+	}
+	s.audit(who, slug, herenowv1.AuditAction_AUDIT_ACTION_SHARE, true)
+	w.WriteHeader(http.StatusOK)
+}
+
+// parseVisibility maps the wire strings accepted by the set-visibility endpoint
+// to the Visibility enum. The unspecified/zero value is never a valid target, so
+// an unrecognized string returns ok=false and the caller rejects it with 400.
+func parseVisibility(s string) (herenowv1.Visibility, bool) {
+	switch s {
+	case "private":
+		return herenowv1.Visibility_VISIBILITY_PRIVATE, true
+	case "invited":
+		return herenowv1.Visibility_VISIBILITY_INVITED, true
+	case "org":
+		return herenowv1.Visibility_VISIBILITY_ORG, true
+	default:
+		return herenowv1.Visibility_VISIBILITY_UNSPECIFIED, false
+	}
 }
 
 func (s *Server) audit(who *herenowv1.Identity, slug string, action herenowv1.AuditAction, allowed bool) {
