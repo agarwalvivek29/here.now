@@ -63,10 +63,20 @@ ADRs are **never deleted**. They are a historical record.
 
 ## Index
 
-| #                                    | Title                                                                                     | Status   | Date       |
-| ------------------------------------ | ----------------------------------------------------------------------------------------- | -------- | ---------- |
-| [0001](./0001-monorepo-structure.md) | Monorepo with per-service isolation                                                       | Accepted | 2026-03-06 |
-| [0002](./0002-auth-model.md)         | Pluggable OIDC/local/forward-auth + per-artifact RBAC (diverges from JWT+API-key default) | Accepted | 2026-07-07 |
+| #                                                     | Title                                                                                     | Status   | Date       |
+| ----------------------------------------------------- | ----------------------------------------------------------------------------------------- | -------- | ---------- |
+| [0001](./0001-monorepo-structure.md)                  | Monorepo with per-service isolation                                                       | Accepted | 2026-03-06 |
+| [0002](./0002-auth-model.md)                          | Pluggable OIDC/local/forward-auth + per-artifact RBAC (diverges from JWT+API-key default) | Accepted | 2026-07-07 |
+| [0003](./0003-branch-strategy.md)                     | Build ArtifactA v2 on `main` (trunk-based; astra-v2 abandoned)                            | Accepted | 2026-08-12 |
+| [0004](./0004-artifact-bundle-format.md)              | Artifact bundle format: single-file now, zip+manifest later                               | Accepted | 2026-08-09 |
+| [0005](./0005-blob-streaming-interface.md)            | Blob store interface is streaming (`io.ReadCloser`)                                       | Proposed | 2026-08-09 |
+| [0006](./0006-s3-blob-adapter-backend-only.md)        | S3-compatible blob adapter, backend-only (no presigned URLs)                              | Proposed | 2026-08-09 |
+| [0007](./0007-identity-and-auth.md)                   | OIDC browser SSO + CLI loopback-PKCE + assistant-rides-session                            | Accepted | 2026-08-12 |
+| [0008](./0008-separate-content-origin.md)             | Serve artifact bytes from a separate, cookieless content origin                           | Accepted | 2026-08-12 |
+| [0009](./0009-postgres-store-adapter.md)              | Postgres store adapter for grants & "shared with me"                                      | Proposed | 2026-08-12 |
+| [0010](./0010-render-parity-harness.md)               | Viewer render-parity harness (bundle-at-publish leading)                                  | Proposed | 2026-08-12 |
+| [0011](./0011-vpn-fronted-threat-model.md)            | VPN-fronted deployment threat model (amends "no VPN assumed")                             | Accepted | 2026-08-12 |
+| [0012](./0012-assistant-agnostic-publish-surfaces.md) | Assistant-agnostic publish surfaces (API + CLI + MCP + Skill)                             | Accepted | 2026-08-12 |
 
 ---
 
