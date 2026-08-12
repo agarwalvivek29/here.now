@@ -35,6 +35,10 @@ type Server struct {
 	Store Store
 	Blob  Blob
 	Auth  Auth
+	// OIDC, when non-nil, provides browser SSO (ADR-0007): its Login/Callback
+	// handlers replace the dev cookie-setter and it is the request authenticator.
+	// When nil, the server uses the dev /login helper and the Local adapter.
+	OIDC *OIDCProvider
 }
 
 func (s *Server) Routes() http.Handler {
@@ -45,7 +49,13 @@ func (s *Server) Routes() http.Handler {
 		_, _ = w.Write([]byte("# metrics: not yet implemented\n"))
 	})
 
-	mux.HandleFunc("GET /login", s.login) // dev helper: sets the session cookie
+	// Auth routes: real OIDC SSO when configured, else the dev cookie-setter.
+	if s.OIDC != nil {
+		mux.HandleFunc("GET /login", s.OIDC.Login)
+		mux.HandleFunc("GET /callback", s.OIDC.Callback)
+	} else {
+		mux.HandleFunc("GET /login", s.login) // dev helper: sets the session cookie
+	}
 
 	// Content routes are rate-limited per client IP (120 req/min) to blunt
 	// scraping and brute-force enumeration; /health and /metrics stay unwrapped

@@ -17,9 +17,21 @@ type Config struct {
 	Token   string `json:"token"`
 	Sub     string `json:"sub"`
 	Email   string `json:"email"`
-	// OIDC settings are loaded for later use; OIDC is not wired up yet.
-	OIDCIssuer   string `json:"oidc_issuer"`
-	OIDCClientID string `json:"oidc_client_id"`
+	// OIDC browser-SSO settings (ADR-0007, FR6). When OIDCIssuer + OIDCClientID
+	// are set, the server wires the OIDC provider and its /login + /callback
+	// handlers; otherwise it falls back to the Local single-token adapter.
+	OIDCIssuer       string `json:"oidc_issuer"`
+	OIDCClientID     string `json:"oidc_client_id"`
+	OIDCClientSecret string `json:"oidc_client_secret"`
+	OIDCRedirectURL  string `json:"oidc_redirect_url"`
+	// SessionSecret keys the HMAC signature on stateless session cookies. Never
+	// commit a real value — supply via ARTIFACTA_SESSION_SECRET.
+	SessionSecret string `json:"session_secret"`
+}
+
+// OIDCEnabled reports whether enough OIDC config is present to wire browser SSO.
+func (c Config) OIDCEnabled() bool {
+	return c.OIDCIssuer != "" && c.OIDCClientID != ""
 }
 
 func (c Config) Identity() *herenowv1.Identity {
@@ -70,6 +82,9 @@ func applyEnv(c *Config) {
 	setFromEnv("ARTIFACTA_DATA_DIR", &c.DataDir)
 	setFromEnv("ARTIFACTA_OIDC_ISSUER", &c.OIDCIssuer)
 	setFromEnv("ARTIFACTA_OIDC_CLIENT_ID", &c.OIDCClientID)
+	setFromEnv("ARTIFACTA_OIDC_CLIENT_SECRET", &c.OIDCClientSecret)
+	setFromEnv("ARTIFACTA_OIDC_REDIRECT_URL", &c.OIDCRedirectURL)
+	setFromEnv("ARTIFACTA_SESSION_SECRET", &c.SessionSecret)
 }
 
 // setFromEnv writes the value of env var key into dst only when it is non-empty.
