@@ -12,7 +12,7 @@ func artifact(owner string, vis herenowv1.Visibility) *herenowv1.Artifact {
 	return &herenowv1.Artifact{Slug: "doc", OwnerSub: owner, Visibility: vis}
 }
 
-// grant to a grantee on a slug. CanView keys only on grantee (see slug note).
+// grant to a grantee on a slug. CanView keys on both grantee and slug.
 func grant(slug, grantee string) *herenowv1.Grant {
 	return &herenowv1.Grant{Slug: slug, GranteeSub: grantee}
 }
@@ -67,17 +67,16 @@ func TestCanView(t *testing.T) {
 	}
 }
 
-// CanView does NOT scope grants by slug — it matches on grantee only, trusting
-// the caller to pass grants already filtered to the artifact's slug. This test
-// pins that current behavior: a grant for a DIFFERENT slug but the right grantee
-// still allows. Flagged for FR29 — if per-call slug scoping is intended, CanView
-// must also compare g.GetSlug() to a.GetSlug() and this expectation flips.
-func TestCanView_notSlugScoped(t *testing.T) {
+// CanView scopes grants by slug (FR29, F-1): it matches on both grantee AND
+// slug, so a grant for a DIFFERENT slug never authorizes even if the grantee
+// matches. This is defense-in-depth — the decision holds even when the caller
+// passes an unfiltered grants list.
+func TestCanView_slugScoped(t *testing.T) {
 	art := artifact("sub-owner", herenowv1.Visibility_VISIBILITY_INVITED)
 	who := &herenowv1.Identity{Sub: "sub-viewer"}
 	grants := []*herenowv1.Grant{grant("a-different-slug", "sub-viewer")}
-	if !CanView(art, who, grants) {
-		t.Errorf("CanView() = false; expected true — CanView matches grantee only, not slug")
+	if CanView(art, who, grants) {
+		t.Errorf("CanView() = true; expected false — a wrong-slug grant must not authorize")
 	}
 }
 
