@@ -24,6 +24,7 @@ Usage:
   herenow publish <file>    publish an artifact, print its link
   herenow ls                list your artifacts
   herenow serve             run the viewer server
+  herenow audit verify      verify the audit-log hash chain
 
 Docs: docs/PLAN.md is legacy; see docs/PRODUCT.md, docs/ARCHITECTURE.md
 `
@@ -42,6 +43,8 @@ func Run(args []string) error {
 		return ls()
 	case "serve":
 		return serve()
+	case "audit":
+		return audit(args[1:])
 	case "help", "-h", "--help":
 		fmt.Print(usage)
 		return nil
@@ -151,6 +154,22 @@ func ls() error {
 			a.GetCreatedAt().AsTime().Format("2006-01-02 15:04"),
 			a.GetVisibility().String(), c.BaseURL, a.GetSlug(), a.GetTitle())
 	}
+	return nil
+}
+
+func audit(args []string) error {
+	if len(args) < 1 || args[0] != "verify" {
+		return fmt.Errorf("usage: herenow audit verify")
+	}
+	c, err := config.Load()
+	if err != nil {
+		return err
+	}
+	n, err := infra.VerifyAuditLog(filepath.Join(c.DataDir, "meta"))
+	if err != nil {
+		return err
+	}
+	fmt.Printf("audit chain OK (%d events)\n", n)
 	return nil
 }
 
