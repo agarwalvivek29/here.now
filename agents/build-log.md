@@ -8,72 +8,77 @@
 
 - Each task = a short-lived **worktree branch off `main`** → **PR into `main`** → I review
   (FR acceptance criteria + tests green + clean/modular + concise comments) → **auto-merge**
-  after review (per user, 2026-08-12).
-- Dependent tasks re-branch off the **updated `main`** after their prerequisites merge.
+  after review (per user, 2026-08-12). Dependent tasks re-branch off the updated `main`.
 - **Infra-gated** items (OIDC end-to-end vs a real IdP, TLS/VPN deploy, render-parity vs real
   Claude artifacts) are built with **mocks/fixtures + flagged** for later infra validation.
-- Worktree agents symlink `node_modules` + `.husky/_` from the repo root so hooks run
-  (commitlint requires lower-case subjects; never `--no-verify`).
-- Code: clean, modular, concise comments. `main` must always build.
+- Worktree agents symlink `node_modules` + `.husky/_` so hooks run (commitlint = lower-case
+  subjects; never `--no-verify`). `main` must always build.
 
 ## Decisions (source of truth: PRD memlog + ADRs)
 
-- Product **ArtifactA** = productization of the `here.now` wedge. P0: **any AI assistant can
-  publish** (ADR-0012). Auth: OIDC browser SSO + CLI loopback-PKCE; assistant rides the CLI
-  session (ADR-0007). Deploy: **behind VPN**; RBAC + audit retained (ADR-0011). Visibility:
+- **ArtifactA** = productization of the `here.now` wedge. P0: **any AI assistant can publish**
+  (ADR-0012). Auth: OIDC browser SSO + CLI loopback-PKCE; assistant rides the CLI session
+  (ADR-0007). Deploy: **behind VPN**; RBAC + audit retained (ADR-0011). Visibility:
   PRIVATE / INVITED / ORG (ORG = any employee). Storage: single-file bundle (ADR-0004),
-  streaming Blob (ADR-0005), S3 backend-only later (ADR-0006), Postgres for shared-with-me
-  (ADR-0009). Viewer: separate content origin (ADR-0008), render-parity harness (ADR-0010).
-- Phasing: **P0 launch** (FR1–FR32); fast-follow (MCP, workspaces/teams, Postgres+S3, TTL);
-  later (collaboration loop, Helm).
+  streaming Blob (ADR-0005), S3 backend-only later (ADR-0006), Postgres later (ADR-0009).
+  Viewer: separate content origin (ADR-0008), render-parity harness (ADR-0010).
+- **CLI→API auth (decided W3-T3):** the CLI sends its OIDC `id_token` as a `Bearer`, verified
+  server-side via the same JWKS (self-contained single-app). Token stored in the 0600 config
+  file for now; **OS-keychain is a hardening follow-up** (ADR-0007).
+- Phasing: P0 launch; fast-follow (MCP, workspaces/teams, Postgres+S3, TTL); later
+  (collaboration loop, Helm). **Deploy track deferred** per user (2026-08-12).
 
 ## Findings
 
-- **F-1 (RESOLVED, PR #5)** — `CanView` grants were not slug-scoped. Fixed: `CanView` now
-  matches grantee AND slug (defense-in-depth). Was never exploitable (server pre-filters).
-
-## Open notes / carried debt
-
-- **maxBytes** middleware (PR #8) is defined + tested but **not yet wired to a route** — no
-  upload route exists until the publish API. Wire it there (FR1). Rate-limit IS live on
-  `/a/{slug}` + `/a/{slug}/raw` (120/min per IP).
+- **F-1 (RESOLVED, PR #5)** — `CanView` grants weren't slug-scoped; now matches grantee AND
+  slug (defense-in-depth). Was never exploitable (server pre-filters).
 
 ## Waves
 
-### Wave 1 — zero-dependency P0 foundation — **MERGED ✓**
+### Wave 1 — foundation — **MERGED ✓**
 
-| Task                                     | FR             | PR  |
-| ---------------------------------------- | -------------- | --- |
-| W1-T1 `CanView` + `NewSlug` unit tests   | FR29           | #3  |
-| W1-T2 streaming `Blob` (`io.ReadCloser`) | FR23           | #1  |
-| W1-T3 atomic metadata writes             | FR24           | #2  |
-| W1-T4 env-var config (`ARTIFACTA_`)      | FR25 (partial) | #4  |
+| Task                      | FR   | PR  |
+| ------------------------- | ---- | --- |
+| streaming `Blob`          | FR23 | #1  |
+| atomic metadata writes    | FR24 | #2  |
+| `CanView`/`NewSlug` tests | FR29 | #3  |
+| env-var config            | FR25 | #4  |
 
-### Wave 2 — hardening + dashboard/data foundation — **MERGED ✓**
+### Wave 2 — hardening + data foundation — **MERGED ✓**
 
-| Task                                              | FR        | PR  |
-| ------------------------------------------------- | --------- | --- |
-| W2-T1 slug-scope `CanView` (fixes F-1)            | FR10/FR29 | #5  |
-| W2-T2 `ListByGrantee` + `ListVisibleTo`           | FR18 (D1) | #6  |
-| W2-T3 audit-integrity verifier (`audit verify`)   | FR21      | #7  |
-| W2-T4 rate-limit content routes + body-size guard | FR31      | #8  |
+| Task                            | FR      | PR  |
+| ------------------------------- | ------- | --- |
+| slug-scope `CanView` (F-1)      | FR10/29 | #5  |
+| `ListByGrantee`/`ListVisibleTo` | FR18    | #6  |
+| audit-integrity verifier        | FR21    | #7  |
+| rate-limit + body-size guard    | FR31    | #8  |
 
-Integration after each wave: `go build ./...` + `go test ./...` green (api/config/domain/infra).
+### Wave 3 — identity + publish core (infra-gated) — **in progress**
 
-### Wave 3 — infra-gated P0 core (candidate, pending sequencing) — **not started**
+| Task                                             | FR      | PR  | Status   |
+| ------------------------------------------------ | ------- | --- | -------- |
+| `artifacta-publish` Skill                        | FR4     | #9  | merged ✓ |
+| OIDC browser SSO (mock issuer)                   | FR6     | #10 | merged ✓ |
+| publish API `POST /artifacts` (+ maxBytes wired) | FR1     | #11 | merged ✓ |
+| CLI loopback login + publish-over-API (Bearer)   | FR2/FR7 | —   | building |
 
-- Publish API `POST /artifacts` (FR1) + CLI publish-over-API + Skill (FR2/FR4) [mock auth].
-- OIDC browser SSO scaffolding (FR6) + CLI loopback-PKCE (FR7) [mock issuer/JWKS].
+Also merged: ARCHITECTURE.md VPN constraint update (ADR-0011 action item).
+
+### Remaining P0 (later waves)
+
 - `share`/grants routes (FR12/13) → dashboard Mine/Shared/Org (FR18/19) → login page.
 - Separate cookieless content origin wiring (FR16, ADR-0008).
-- Render-parity harness (FR15, ADR-0010 — bundle-at-publish leading) [vs real artifacts].
-- Deploy: docker-compose + TLS + real /metrics + structured logging (FR25–27).
-- ARCHITECTURE.md constraint update for VPN (ADR-0011 action item).
+- Render-parity harness (FR15, ADR-0010 — bundle-at-publish) [vs real artifacts].
+- Deploy: docker-compose + TLS + real /metrics + logging (FR25–27) — **deferred (needs
+  infra approval)**.
+- Security gate: broaden e2e (FR30), `/review` or `/cso` pass (FR32).
 
 ## Log
 
-- **2026-08-12** — Folded `astra-v2` into `main` (ADR-0003); wrote ADRs 0003–0012 + index.
-- **2026-08-12** — **Wave 1** dispatched (4 worktree agents) → PRs #1–#4, reviewed +
-  squash-merged, integration green. Finding F-1 recorded.
-- **2026-08-12** — **Wave 2** dispatched → PRs #5–#8, reviewed + squash-merged, integration
-  green. F-1 resolved (#5). Wave 3 (infra-gated core) planned; paused for sequencing.
+- **2026-08-12** — Folded `astra-v2` → `main` (ADR-0003); wrote ADRs 0003–0012.
+- **2026-08-12** — Wave 1 → PRs #1–#4 merged (green). F-1 recorded.
+- **2026-08-12** — Wave 2 → PRs #5–#8 merged (green). F-1 resolved (#5).
+- **2026-08-12** — ARCHITECTURE.md VPN update (a7eae4c). Wave 3: Skill #9, OIDC SSO #10,
+  publish API #11 merged (each reviewed incl. independent build/test; auth code diff-reviewed
+  for fail-closed + JWKS verify + empty-secret guard). maxBytes debt cleared (#11). CLI-client
+  (W3-T3) dispatched with id_token-as-Bearer design.
