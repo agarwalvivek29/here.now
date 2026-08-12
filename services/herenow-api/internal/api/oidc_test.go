@@ -225,6 +225,48 @@ func TestOIDCIdentifyRejectsBadSessions(t *testing.T) {
 	}
 }
 
+// TestOIDCIdentifyAcceptsValidBearer covers the CLI API-client path: a valid
+// OIDC id_token presented as `Authorization: Bearer` resolves an identity, with
+// no session cookie present.
+func TestOIDCIdentifyAcceptsValidBearer(t *testing.T) {
+	idp := newMockIDP(t, "test-client", "oidc-sub-99", "bob@example.com")
+	p := newTestProvider(t, idp)
+
+	raw := idp.signIDToken(t, time.Now().Add(time.Hour))
+	req := httptest.NewRequest(http.MethodPost, "/artifacts", nil)
+	req.Header.Set("Authorization", "Bearer "+raw)
+
+	who, ok := p.Identify(req)
+	if !ok {
+		t.Fatalf("Identify rejected a valid bearer id_token")
+	}
+	if who.GetSub() != "oidc-sub-99" || who.GetEmail() != "bob@example.com" {
+		t.Fatalf("Identify = (%q, %q), want (oidc-sub-99, bob@example.com)", who.GetSub(), who.GetEmail())
+	}
+}
+
+// TestOIDCIdentifyRejectsBadBearer confirms the bearer path fails closed on a
+// malformed token and on an expired-but-well-signed token.
+func TestOIDCIdentifyRejectsBadBearer(t *testing.T) {
+	idp := newMockIDP(t, "test-client", "s", "e@x.co")
+	p := newTestProvider(t, idp)
+
+	// Garbage token: not a verifiable JWT.
+	garbage := httptest.NewRequest(http.MethodPost, "/artifacts", nil)
+	garbage.Header.Set("Authorization", "Bearer not-a-jwt")
+	if _, ok := p.Identify(garbage); ok {
+		t.Fatalf("Identify accepted a garbage bearer token")
+	}
+
+	// Expired token: correctly signed by the issuer but past its exp.
+	expired := idp.signIDToken(t, time.Now().Add(-time.Hour))
+	expReq := httptest.NewRequest(http.MethodPost, "/artifacts", nil)
+	expReq.Header.Set("Authorization", "Bearer "+expired)
+	if _, ok := p.Identify(expReq); ok {
+		t.Fatalf("Identify accepted an expired bearer id_token")
+	}
+}
+
 // --- cookie helpers ---
 
 func readCookies(rr *httptest.ResponseRecorder) []*http.Cookie {

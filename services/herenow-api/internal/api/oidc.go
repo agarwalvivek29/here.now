@@ -66,18 +66,42 @@ func NewOIDCProvider(ctx context.Context, issuer, clientID, clientSecret, redire
 	}, nil
 }
 
-// Identify authenticates a request from the hn_session cookie. It fails closed:
-// a missing, malformed, tampered, or expired cookie yields (nil, false).
+// Identify authenticates a request. It prefers the browser hn_session cookie;
+// failing that it accepts a CLI-supplied OIDC id_token as `Authorization: Bearer
+// <id_token>`, verified against the SAME issuer JWKS/audience the browser flow
+// uses (a self-contained single-app system per ADR-0007). It fails closed: a
+// missing, malformed, tampered, or expired credential yields (nil, false).
 func (p *OIDCProvider) Identify(r *http.Request) (*herenowv1.Identity, bool) {
-	c, err := r.Cookie(sessionCookie)
-	if err != nil {
+	// Cookie path first (browser SSO).
+	if c, err := r.Cookie(sessionCookie); err == nil {
+		if sub, email, ok := p.sessions.ParseSession(c.Value); ok && sub != "" {
+			return &herenowv1.Identity{Sub: sub, Email: email}, true
+		}
+	}
+	// Bearer path (CLI API client): verify the id_token against the issuer.
+	if tok := bearer(r); tok != "" {
+		if id, ok := p.identifyBearer(r.Context(), tok); ok {
+			return id, true
+		}
+	}
+	return nil, false
+}
+
+// identifyBearer verifies a raw OIDC id_token (signature via JWKS, plus
+// iss/aud/exp) and returns the Identity carried by its sub/email claims. It
+// fails closed on any verification or claim-extraction error.
+func (p *OIDCProvider) identifyBearer(ctx context.Context, raw string) (*herenowv1.Identity, bool) {
+	idToken, err := p.verifier.Verify(ctx, raw)
+	if err != nil || idToken.Subject == "" {
 		return nil, false
 	}
-	sub, email, ok := p.sessions.ParseSession(c.Value)
-	if !ok || sub == "" {
+	var claims struct {
+		Email string `json:"email"`
+	}
+	if err := idToken.Claims(&claims); err != nil {
 		return nil, false
 	}
-	return &herenowv1.Identity{Sub: sub, Email: email}, true
+	return &herenowv1.Identity{Sub: idToken.Subject, Email: claims.Email}, true
 }
 
 // Login begins the Authorization-Code + PKCE flow: it generates a state nonce

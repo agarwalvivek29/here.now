@@ -27,6 +27,11 @@ type Config struct {
 	// SessionSecret keys the HMAC signature on stateless session cookies. Never
 	// commit a real value — supply via ARTIFACTA_SESSION_SECRET.
 	SessionSecret string `json:"session_secret"`
+	// AccessToken holds the OIDC id_token obtained by `herenow login` and sent as
+	// `Authorization: Bearer <id_token>` when publishing to a remote API (ADR-0007).
+	// Stored in the 0600 config file for now.
+	// TODO(hardening): move token to OS keychain (ADR-0007).
+	AccessToken string `json:"access_token"`
 }
 
 // OIDCEnabled reports whether enough OIDC config is present to wire browser SSO.
@@ -85,6 +90,7 @@ func applyEnv(c *Config) {
 	setFromEnv("ARTIFACTA_OIDC_CLIENT_SECRET", &c.OIDCClientSecret)
 	setFromEnv("ARTIFACTA_OIDC_REDIRECT_URL", &c.OIDCRedirectURL)
 	setFromEnv("ARTIFACTA_SESSION_SECRET", &c.SessionSecret)
+	setFromEnv("ARTIFACTA_ACCESS_TOKEN", &c.AccessToken)
 }
 
 // setFromEnv writes the value of env var key into dst only when it is non-empty.

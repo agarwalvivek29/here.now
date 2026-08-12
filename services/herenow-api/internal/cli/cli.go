@@ -1,14 +1,24 @@
-// Package cli implements the herenow command-line interface. In v0 the CLI talks
-// to the local store directly (single-user, no server round-trip to publish);
-// `serve` runs the viewer. A remote/API client is added with the MCP connector.
+// Package cli implements the herenow command-line interface. The CLI is both a
+// local tool (talks to the local store directly for zero-dependency dev use)
+// and an API client: when OIDC is configured it logs in via a loopback
+// Authorization-Code + PKCE flow and publishes to a remote server over HTTP
+// using its OIDC id_token as a Bearer token (ADR-0007). `serve` runs the viewer.
 package cli
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	herenowv1 "github.com/agarwalvivek29/here.now/packages/schema/generated/go/herenow/v1"
@@ -16,6 +26,8 @@ import (
 	"github.com/agarwalvivek29/here.now/services/herenow-api/internal/config"
 	"github.com/agarwalvivek29/here.now/services/herenow-api/internal/domain"
 	"github.com/agarwalvivek29/here.now/services/herenow-api/internal/infra"
+	"github.com/coreos/go-oidc/v3/oidc"
+	"golang.org/x/oauth2"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -72,6 +84,13 @@ func login() error {
 	if err != nil {
 		return err
 	}
+	// OIDC configured: perform a real loopback browser login and store the
+	// id_token as the CLI's Bearer credential.
+	if c.OIDCEnabled() {
+		return loginOIDC(c)
+	}
+
+	// Local single-token fallback (zero-dependency dev mode).
 	if c.Sub == "" {
 		u := os.Getenv("USER")
 		if u == "" {
@@ -92,22 +111,170 @@ func login() error {
 	return nil
 }
 
+// loginOIDC runs the interactive loopback Authorization-Code + PKCE login: it
+// discovers the issuer, starts a throwaway HTTP server on 127.0.0.1:<random>,
+// opens the browser to the IdP authorize URL (redirect_uri = the loopback URL),
+// receives the code on the loopback handler, exchanges it with the PKCE verifier,
+// verifies the id_token, stores it via config.Save(), and shuts the server down.
+func loginOIDC(c config.Config) error {
+	ctx := context.Background()
+	provider, err := oidc.NewProvider(ctx, c.OIDCIssuer)
+	if err != nil {
+		return fmt.Errorf("oidc discovery: %w", err)
+	}
+	verifier := provider.Verifier(&oidc.Config{ClientID: c.OIDCClientID})
+
+	// Bind an ephemeral loopback port; the bound address is the redirect URI.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return fmt.Errorf("bind loopback: %w", err)
+	}
+	oauthCfg := &oauth2.Config{
+		ClientID:     c.OIDCClientID,
+		ClientSecret: c.OIDCClientSecret,
+		RedirectURL:  fmt.Sprintf("http://%s/callback", ln.Addr().String()),
+		Endpoint:     provider.Endpoint(),
+		Scopes:       []string{oidc.ScopeOpenID, "email", "profile"},
+	}
+
+	state, err := randState()
+	if err != nil {
+		ln.Close()
+		return err
+	}
+	pkce := oauth2.GenerateVerifier()
+
+	// loginResult carries the outcome from the loopback handler back to the
+	// waiting command.
+	type loginResult struct {
+		idToken string
+		sub     string
+		email   string
+		err     error
+	}
+	resCh := make(chan loginResult, 1)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("state") != state {
+			http.Error(w, "bad state", http.StatusBadRequest)
+			resCh <- loginResult{err: fmt.Errorf("state mismatch on callback")}
+			return
+		}
+		raw, sub, email, err := exchangeCode(r.Context(), oauthCfg, verifier, r.URL.Query().Get("code"), pkce)
+		if err != nil {
+			http.Error(w, "login failed", http.StatusBadGateway)
+			resCh <- loginResult{err: err}
+			return
+		}
+		fmt.Fprintln(w, "here.now login complete — you can close this tab.")
+		resCh <- loginResult{idToken: raw, sub: sub, email: email}
+	})
+
+	srv := &http.Server{Handler: mux}
+	go func() { _ = srv.Serve(ln) }()
+	defer srv.Shutdown(context.Background())
+
+	authURL := oauthCfg.AuthCodeURL(state, oauth2.AccessTypeOnline, oauth2.S256ChallengeOption(pkce))
+	fmt.Printf("opening browser to log in:\n  %s\n", authURL)
+	if err := openBrowser(authURL); err != nil {
+		fmt.Printf("(could not open a browser automatically — open the URL above manually)\n")
+	}
+
+	res := <-resCh
+	if res.err != nil {
+		return res.err
+	}
+
+	c.AccessToken = res.idToken
+	c.Sub = res.sub
+	c.Email = res.email
+	if err := config.Save(c); err != nil {
+		return err
+	}
+	fmt.Printf("logged in as %s\n", c.Email)
+	return nil
+}
+
+// exchangeCode swaps an authorization code (with its PKCE verifier) for tokens,
+// then verifies the returned id_token against the issuer and extracts sub+email.
+// It is separated from the loopback plumbing so the exchange can be unit-tested
+// without a browser.
+func exchangeCode(ctx context.Context, oauthCfg *oauth2.Config, verifier *oidc.IDTokenVerifier, code, pkce string) (idToken, sub, email string, err error) {
+	tok, err := oauthCfg.Exchange(ctx, code, oauth2.VerifierOption(pkce))
+	if err != nil {
+		return "", "", "", err
+	}
+	raw, ok := tok.Extra("id_token").(string)
+	if !ok || raw == "" {
+		return "", "", "", fmt.Errorf("token response carried no id_token")
+	}
+	idt, err := verifier.Verify(ctx, raw)
+	if err != nil {
+		return "", "", "", err
+	}
+	var claims struct {
+		Email string `json:"email"`
+	}
+	if err := idt.Claims(&claims); err != nil {
+		return "", "", "", err
+	}
+	return raw, idt.Subject, claims.Email, nil
+}
+
+// randState returns a 256-bit base64url random string for the OAuth state nonce.
+func randState() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// openBrowser best-effort opens url in the platform's default browser.
+func openBrowser(target string) error {
+	var name string
+	var args []string
+	switch runtime.GOOS {
+	case "darwin":
+		name, args = "open", []string{target}
+	case "windows":
+		name, args = "rundll32", []string{"url.dll,FileProtocolHandler", target}
+	default: // linux, bsd, etc.
+		name, args = "xdg-open", []string{target}
+	}
+	return exec.Command(name, args...).Start()
+}
+
 func publish(args []string) error {
 	if len(args) < 1 {
 		return fmt.Errorf("usage: herenow publish <file>")
+	}
+	c, err := config.Load()
+	if err != nil {
+		return err
+	}
+
+	// Remote API mode: a server is targeted and we hold an access token — POST
+	// the file over HTTP with the id_token as a Bearer credential.
+	if c.BaseURL != "" && c.AccessToken != "" {
+		link, err := publishRemote(c.BaseURL, c.AccessToken, args[0])
+		if err != nil {
+			return err
+		}
+		fmt.Println(link)
+		return nil
+	}
+
+	// Backward-compatible dev mode: write directly to the local store.
+	if c.Sub == "" {
+		return fmt.Errorf("not logged in — run: herenow login")
 	}
 	f, err := os.Open(args[0])
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	c, err := config.Load()
-	if err != nil {
-		return err
-	}
-	if c.Sub == "" {
-		return fmt.Errorf("not logged in — run: herenow login")
-	}
 	st, bl, err := open(c)
 	if err != nil {
 		return err
@@ -132,6 +299,44 @@ func publish(args []string) error {
 	})
 	fmt.Printf("%s/a/%s\n", c.BaseURL, art.GetSlug())
 	return nil
+}
+
+// publishRemote POSTs the file at path to <baseURL>/artifacts?title=<basename>
+// with `Authorization: Bearer <token>` and returns the `url` from the JSON
+// response. It is unit-testable against an httptest.Server.
+func publishRemote(baseURL, token, path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	endpoint := strings.TrimSuffix(baseURL, "/") + "/artifacts?title=" + url.QueryEscape(filepath.Base(path))
+	req, err := http.NewRequest(http.MethodPost, endpoint, f)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "text/html; charset=utf-8")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return "", fmt.Errorf("publish failed: %s: %s", resp.Status, strings.TrimSpace(string(body)))
+	}
+
+	var out struct {
+		Slug string `json:"slug"`
+		URL  string `json:"url"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", fmt.Errorf("decode publish response: %w", err)
+	}
+	return out.URL, nil
 }
 
 func ls() error {
