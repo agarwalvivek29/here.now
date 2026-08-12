@@ -6,6 +6,7 @@
 package api
 
 import (
+	"io"
 	"net/http"
 
 	herenowv1 "github.com/agarwalvivek29/here.now/packages/schema/generated/go/herenow/v1"
@@ -23,7 +24,7 @@ type Store interface {
 }
 
 type Blob interface {
-	Get(slug string) ([]byte, error)
+	Get(slug string) (io.ReadCloser, error)
 }
 
 type Auth interface {
@@ -96,12 +97,14 @@ func (s *Server) raw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	content, err := s.Blob.Get(slug)
+	// Invariant: the blob is fetched ONLY after CanView allows above.
+	rc, err := s.Blob.Get(slug)
 	if err != nil {
 		s.audit(who, slug, herenowv1.AuditAction_AUDIT_ACTION_DENY, false)
 		http.Error(w, "unavailable", http.StatusInternalServerError)
 		return
 	}
+	defer rc.Close()
 	s.audit(who, slug, herenowv1.AuditAction_AUDIT_ACTION_VIEW, true)
 
 	ct := art.GetContentType()
@@ -112,7 +115,7 @@ func (s *Server) raw(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Security-Policy",
 		"sandbox allow-scripts; default-src 'none'; img-src data: https:; style-src 'unsafe-inline'; script-src 'unsafe-inline'")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	_, _ = w.Write(content)
+	_, _ = io.Copy(w, rc)
 }
 
 func (s *Server) audit(who *herenowv1.Identity, slug string, action herenowv1.AuditAction, allowed bool) {
