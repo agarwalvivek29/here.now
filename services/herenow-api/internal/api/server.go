@@ -6,6 +6,8 @@
 package api
 
 import (
+	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 
@@ -19,12 +21,14 @@ import (
 // api.Local satisfy these.
 type Store interface {
 	GetArtifact(slug string) (*herenowv1.Artifact, bool, error)
+	PutArtifact(a *herenowv1.Artifact) error
 	Grants(slug string) ([]*herenowv1.Grant, error)
 	Append(ev *herenowv1.AuditEvent) error
 }
 
 type Blob interface {
 	Get(slug string) (io.ReadCloser, error)
+	Put(slug string, r io.Reader) error
 }
 
 type Auth interface {
@@ -35,6 +39,9 @@ type Server struct {
 	Store Store
 	Blob  Blob
 	Auth  Auth
+	// BaseURL is the public origin (e.g. https://here.now) used to build the
+	// absolute artifact link returned by the publish API.
+	BaseURL string
 	// OIDC, when non-nil, provides browser SSO (ADR-0007): its Login/Callback
 	// handlers replace the dev cookie-setter and it is the request authenticator.
 	// When nil, the server uses the dev /login helper and the Local adapter.
@@ -64,6 +71,12 @@ func (s *Server) Routes() http.Handler {
 	const contentPerMinute = 120
 	mux.Handle("GET /a/{slug}", rateLimit(http.HandlerFunc(s.viewer), contentPerMinute))  // viewer shell (no content)
 	mux.Handle("GET /a/{slug}/raw", rateLimit(http.HandlerFunc(s.raw), contentPerMinute)) // authz-gated bundle bytes
+
+	// Publish (FR1): authenticated upload. The body is capped at 25 MiB by the
+	// maxBytes transport guard (finally wiring the previously-defined ceiling)
+	// and rate-limited per client IP like the other content routes.
+	const maxPublishBytes = 25 << 20 // 25 MiB
+	mux.Handle("POST /artifacts", rateLimit(maxBytes(http.HandlerFunc(s.publish), maxPublishBytes), contentPerMinute))
 	return mux
 }
 
@@ -132,6 +145,67 @@ func (s *Server) raw(w http.ResponseWriter, r *http.Request) {
 		"sandbox allow-scripts; default-src 'none'; img-src data: https:; style-src 'unsafe-inline'; script-src 'unsafe-inline'")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	_, _ = io.Copy(w, rc)
+}
+
+// publish accepts an authenticated upload and creates a private artifact. The
+// body is streamed to the blob store; metadata is recorded; a PUBLISH audit
+// event is written. Fails closed: an unauthenticated caller gets 401 and
+// nothing is stored.
+func (s *Server) publish(w http.ResponseWriter, r *http.Request) {
+	who, ok := s.Auth.Identify(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized) // don't leak anything
+		return
+	}
+	owner := who.GetSub()
+
+	title := r.URL.Query().Get("title")
+	if title == "" {
+		title = "untitled"
+	}
+	ct := r.Header.Get("Content-Type")
+	if ct == "" {
+		ct = "text/html; charset=utf-8"
+	}
+
+	slug := domain.NewSlug()
+
+	// Stream the request body straight to the blob store (no full-payload
+	// buffering). An over-limit body trips the maxBytes guard here and surfaces
+	// as a MaxBytesError, which we translate to 413.
+	if err := s.Blob.Put(slug, r.Body); err != nil {
+		var mbe *http.MaxBytesError
+		if errors.As(err, &mbe) {
+			s.audit(who, slug, herenowv1.AuditAction_AUDIT_ACTION_DENY, false)
+			http.Error(w, "payload too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		s.audit(who, slug, herenowv1.AuditAction_AUDIT_ACTION_DENY, false)
+		http.Error(w, "unavailable", http.StatusInternalServerError)
+		return
+	}
+
+	art := &herenowv1.Artifact{
+		Slug:        slug,
+		OwnerSub:    owner,
+		Title:       title,
+		Visibility:  herenowv1.Visibility_VISIBILITY_PRIVATE, // private by default
+		ContentType: ct,
+		CreatedAt:   timestamppb.Now(),
+	}
+	if err := s.Store.PutArtifact(art); err != nil {
+		s.audit(who, slug, herenowv1.AuditAction_AUDIT_ACTION_DENY, false)
+		http.Error(w, "unavailable", http.StatusInternalServerError)
+		return
+	}
+	s.audit(who, slug, herenowv1.AuditAction_AUDIT_ACTION_PUBLISH, true)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"slug": slug,
+		"url":  s.BaseURL + "/a/" + slug,
+	})
 }
 
 func (s *Server) audit(who *herenowv1.Identity, slug string, action herenowv1.AuditAction, allowed bool) {
