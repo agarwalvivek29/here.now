@@ -6,6 +6,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
@@ -13,6 +14,7 @@ import (
 
 	herenowv1 "github.com/agarwalvivek29/here.now/packages/schema/generated/go/herenow/v1"
 	"github.com/agarwalvivek29/here.now/services/herenow-api/internal/domain"
+	"github.com/agarwalvivek29/here.now/services/herenow-api/internal/render"
 	"github.com/agarwalvivek29/here.now/services/herenow-api/internal/web"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -268,16 +270,33 @@ func (s *Server) publish(w http.ResponseWriter, r *http.Request) {
 
 	slug := domain.NewSlug()
 
-	// Stream the request body straight to the blob store (no full-payload
-	// buffering). An over-limit body trips the maxBytes guard here and surfaces
-	// as a MaxBytesError, which we translate to 413.
-	if err := s.Blob.Put(slug, r.Body); err != nil {
+	// Read the body up to the maxBytes ceiling. Unlike the earlier
+	// stream-to-blob path, publish now buffers the payload so the render
+	// pipeline can bundle inline module scripts before storage (FR15,
+	// ADR-0010). Buffering the whole body is acceptable under the 25 MiB cap.
+	// An over-limit body still trips the maxBytes guard on read and surfaces as
+	// a MaxBytesError, which we translate to 413.
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
 		var mbe *http.MaxBytesError
 		if errors.As(err, &mbe) {
 			s.audit(who, slug, herenowv1.AuditAction_AUDIT_ACTION_DENY, false)
 			http.Error(w, "payload too large", http.StatusRequestEntityTooLarge)
 			return
 		}
+		s.audit(who, slug, herenowv1.AuditAction_AUDIT_ACTION_DENY, false)
+		http.Error(w, "unavailable", http.StatusInternalServerError)
+		return
+	}
+
+	// Render-parity pipeline: bundle inline ES modules into a self-contained
+	// artifact that renders under the strict /raw CSP. Fail-soft — Bundle
+	// returns the original bytes (plus warnings) rather than erroring, so a
+	// publish is never blocked by a bundling problem.
+	bundled, bundledCT, _, _ := render.Bundle(body, ct)
+	ct = bundledCT
+
+	if err := s.Blob.Put(slug, bytes.NewReader(bundled)); err != nil {
 		s.audit(who, slug, herenowv1.AuditAction_AUDIT_ACTION_DENY, false)
 		http.Error(w, "unavailable", http.StatusInternalServerError)
 		return
