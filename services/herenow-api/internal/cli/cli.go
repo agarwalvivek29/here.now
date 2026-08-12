@@ -91,10 +91,11 @@ func publish(args []string) error {
 	if len(args) < 1 {
 		return fmt.Errorf("usage: herenow publish <file>")
 	}
-	content, err := os.ReadFile(args[0])
+	f, err := os.Open(args[0])
 	if err != nil {
 		return err
 	}
+	defer f.Close()
 	c, err := config.Load()
 	if err != nil {
 		return err
@@ -114,7 +115,7 @@ func publish(args []string) error {
 		ContentType: "text/html; charset=utf-8",
 		CreatedAt:   timestamppb.Now(),
 	}
-	if err := bl.Put(art.GetSlug(), content); err != nil {
+	if err := bl.Put(art.GetSlug(), f); err != nil {
 		return err
 	}
 	if err := st.PutArtifact(art); err != nil {
