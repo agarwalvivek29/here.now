@@ -184,7 +184,7 @@ func serve() error {
 	if err != nil {
 		return err
 	}
-	srv := &api.Server{Store: st, Blob: bl}
+	srv := &api.Server{Store: st, Blob: bl, BaseURL: c.BaseURL}
 	// Config-driven auth selection: OIDC browser SSO when configured (ADR-0007),
 	// otherwise the Local single-token adapter for zero-dependency/dev deploys.
 	if c.OIDCEnabled() {
