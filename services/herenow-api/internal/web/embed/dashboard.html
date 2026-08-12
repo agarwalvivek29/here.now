@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ArtifactA</title>
+  <style>
+    body { margin: 0; background: #fafafa; color: #1a1a1a; font: 15px/1.5 system-ui, sans-serif; }
+    header { display: flex; align-items: baseline; justify-content: space-between; padding: 1rem 1.5rem; border-bottom: 1px solid #e5e5e5; background: #fff; }
+    header h1 { margin: 0; font-size: 1.15rem; }
+    header .who { color: #666; font-size: 0.85rem; }
+    main { max-width: 760px; margin: 0 auto; padding: 1.5rem; }
+    section { margin-bottom: 2rem; }
+    section h2 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; color: #888; margin: 0 0 0.75rem; }
+    ul { list-style: none; margin: 0; padding: 0; }
+    li { display: flex; align-items: center; justify-content: space-between; padding: 0.6rem 0.75rem; background: #fff; border: 1px solid #e5e5e5; border-radius: 6px; margin-bottom: 0.4rem; }
+    li a { color: #0b62d6; text-decoration: none; font-weight: 500; }
+    li a:hover { text-decoration: underline; }
+    .vis { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: #777; background: #f0f0f0; padding: 0.15rem 0.5rem; border-radius: 999px; }
+    .empty { color: #999; font-size: 0.9rem; padding: 0.4rem 0; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>ArtifactA</h1>
+    <span class="who">{{.Email}}</span>
+  </header>
+  <main>
+    <section>
+      <h2>Mine</h2>
+      {{if .Mine}}
+      <ul>
+        {{range .Mine}}<li><a href="/a/{{.Slug}}">{{.Title}}</a><span class="vis">{{.Visibility}}</span></li>{{end}}
+      </ul>
+      {{else}}<p class="empty">Nothing here yet.</p>{{end}}
+    </section>
+    <section>
+      <h2>Shared with me</h2>
+      {{if .Shared}}
+      <ul>
+        {{range .Shared}}<li><a href="/a/{{.Slug}}">{{.Title}}</a><span class="vis">{{.Visibility}}</span></li>{{end}}
+      </ul>
+      {{else}}<p class="empty">Nothing here yet.</p>{{end}}
+    </section>
+    <section>
+      <h2>Org</h2>
+      {{if .Org}}
+      <ul>
+        {{range .Org}}<li><a href="/a/{{.Slug}}">{{.Title}}</a><span class="vis">{{.Visibility}}</span></li>{{end}}
+      </ul>
+      {{else}}<p class="empty">Nothing here yet.</p>{{end}}
+    </section>
+  </main>
+</body>
+</html>

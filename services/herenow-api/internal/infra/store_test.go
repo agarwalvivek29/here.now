@@ -116,3 +116,45 @@ func TestListByGrantee(t *testing.T) {
 		t.Fatalf("non-grantee expected 0 artifacts, got %d", len(none))
 	}
 }
+
+// TestListByVisibility verifies the Org-tab query returns only artifacts whose
+// visibility matches, regardless of owner.
+func TestListByVisibility(t *testing.T) {
+	s, err := NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+
+	seed := []*herenowv1.Artifact{
+		{Slug: "org-a", OwnerSub: "owner-1", Visibility: herenowv1.Visibility_VISIBILITY_ORG},
+		{Slug: "org-b", OwnerSub: "owner-2", Visibility: herenowv1.Visibility_VISIBILITY_ORG},
+		{Slug: "priv", OwnerSub: "owner-1", Visibility: herenowv1.Visibility_VISIBILITY_PRIVATE},
+		{Slug: "inv", OwnerSub: "owner-1", Visibility: herenowv1.Visibility_VISIBILITY_INVITED},
+	}
+	for _, a := range seed {
+		if err := s.PutArtifact(a); err != nil {
+			t.Fatalf("PutArtifact(%q): %v", a.GetSlug(), err)
+		}
+	}
+
+	org, err := s.ListByVisibility(herenowv1.Visibility_VISIBILITY_ORG)
+	if err != nil {
+		t.Fatalf("ListByVisibility: %v", err)
+	}
+	if len(org) != 2 {
+		t.Fatalf("expected 2 org artifacts, got %d", len(org))
+	}
+	for _, a := range org {
+		if a.GetVisibility() != herenowv1.Visibility_VISIBILITY_ORG {
+			t.Fatalf("non-org artifact leaked: %q (%v)", a.GetSlug(), a.GetVisibility())
+		}
+	}
+
+	priv, err := s.ListByVisibility(herenowv1.Visibility_VISIBILITY_PRIVATE)
+	if err != nil {
+		t.Fatalf("ListByVisibility private: %v", err)
+	}
+	if len(priv) != 1 || priv[0].GetSlug() != "priv" {
+		t.Fatalf("expected only 'priv' as private, got %v", priv)
+	}
+}

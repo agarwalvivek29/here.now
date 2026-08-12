@@ -25,6 +25,10 @@ type Store interface {
 	Grants(slug string) ([]*herenowv1.Grant, error)
 	AddGrant(g *herenowv1.Grant) error
 	Append(ev *herenowv1.AuditEvent) error
+	// Dashboard listings (FR18): Mine, Shared with me, and Org.
+	ListByOwner(sub string) ([]*herenowv1.Artifact, error)
+	ListByGrantee(sub string) ([]*herenowv1.Artifact, error)
+	ListByVisibility(v herenowv1.Visibility) ([]*herenowv1.Artifact, error)
 }
 
 type Blob interface {
@@ -56,6 +60,10 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("# metrics: not yet implemented\n"))
 	})
+
+	// Root (FR18, FR19): the dashboard when signed in, else the sign-in landing.
+	// {$} matches only the exact "/" path, so it never shadows the routes below.
+	mux.HandleFunc("GET /{$}", s.dashboard)
 
 	// Auth routes: real OIDC SSO when configured, else the dev cookie-setter.
 	if s.OIDC != nil {
@@ -96,6 +104,89 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		HttpOnly: true, SameSite: http.SameSiteLaxMode,
 	})
 	http.Redirect(w, r, "/health", http.StatusFound)
+}
+
+// dashboard (FR18, FR19) is the root landing. An unauthenticated caller gets the
+// sign-in page at HTTP 200 (never an error) so the front door always renders. An
+// authenticated caller sees three sections: Mine (owned), Shared with me
+// (grant-based), and Org (org-visible artifacts owned by others). The caller's
+// own artifacts are filtered out of Org so they never appear twice.
+func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
+	who, ok := s.Auth.Identify(r)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if !ok {
+		if err := web.RenderSignin(w); err != nil {
+			http.Error(w, "unavailable", http.StatusInternalServerError)
+		}
+		return
+	}
+	sub := who.GetSub()
+
+	mine, err := s.Store.ListByOwner(sub)
+	if err != nil {
+		http.Error(w, "unavailable", http.StatusInternalServerError)
+		return
+	}
+	shared, err := s.Store.ListByGrantee(sub)
+	if err != nil {
+		http.Error(w, "unavailable", http.StatusInternalServerError)
+		return
+	}
+	org, err := s.Store.ListByVisibility(herenowv1.Visibility_VISIBILITY_ORG)
+	if err != nil {
+		http.Error(w, "unavailable", http.StatusInternalServerError)
+		return
+	}
+
+	data := web.DashboardData{
+		Email:  who.GetEmail(),
+		Mine:   toViews(mine),
+		Shared: toViews(shared),
+	}
+	// Org lists org-visible artifacts owned by someone else — the caller's own
+	// org artifacts already appear under Mine.
+	for _, a := range org {
+		if a.GetOwnerSub() == sub {
+			continue
+		}
+		data.Org = append(data.Org, toView(a))
+	}
+
+	if err := web.RenderDashboard(w, data); err != nil {
+		http.Error(w, "unavailable", http.StatusInternalServerError)
+	}
+}
+
+// toViews projects a slice of artifacts into the dashboard presentation model.
+func toViews(arts []*herenowv1.Artifact) []web.ArtifactView {
+	out := make([]web.ArtifactView, 0, len(arts))
+	for _, a := range arts {
+		out = append(out, toView(a))
+	}
+	return out
+}
+
+func toView(a *herenowv1.Artifact) web.ArtifactView {
+	return web.ArtifactView{
+		Slug:       a.GetSlug(),
+		Title:      a.GetTitle(),
+		Visibility: visibilityLabel(a.GetVisibility()),
+	}
+}
+
+// visibilityLabel maps the Visibility enum to the lower-case wire label shown in
+// the dashboard (the inverse of parseVisibility).
+func visibilityLabel(v herenowv1.Visibility) string {
+	switch v {
+	case herenowv1.Visibility_VISIBILITY_PRIVATE:
+		return "private"
+	case herenowv1.Visibility_VISIBILITY_INVITED:
+		return "invited"
+	case herenowv1.Visibility_VISIBILITY_ORG:
+		return "org"
+	default:
+		return "unknown"
+	}
 }
 
 func (s *Server) viewer(w http.ResponseWriter, _ *http.Request) {
