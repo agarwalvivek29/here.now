@@ -24,7 +24,9 @@ func CanView(a *herenowv1.Artifact, who *herenowv1.Identity, grants []*herenowv1
 		return true // any authenticated user; group scoping arrives with OIDC
 	case herenowv1.Visibility_VISIBILITY_INVITED:
 		for _, g := range grants {
-			if g.GetGranteeSub() == who.GetSub() {
+			// Match grantee AND slug: defense-in-depth so the decision holds
+			// even if the caller passes an unfiltered grants list.
+			if g.GetGranteeSub() == who.GetSub() && g.GetSlug() == a.GetSlug() {
 				return true
 			}
 		}
