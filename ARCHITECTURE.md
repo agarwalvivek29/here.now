@@ -9,8 +9,10 @@ here.now is a self-hostable host for AI-generated artifacts. A single Go binary
 (`serve`). Artifacts are stored as opaque bundles in a blob store the operator controls;
 metadata, grants, and an inbuilt hash-chained audit trail live in the operator's own
 store. Every view passes the app's own authorization decision before any bytes are served.
-Defining constraint: **the app's own auth + RBAC is the complete security boundary — no
-VPN or upstream proxy is assumed.**
+Defining constraint (ArtifactA, see [ADR-0011](docs/adr/0011-vpn-fronted-threat-model.md)):
+the instance is deployed **behind the corporate VPN** (the network perimeter); the app's own
+auth + RBAC + audit are retained as **defense-in-depth and for compliance**, never the sole
+boundary.
 
 ## Service Map
 
@@ -70,7 +72,9 @@ immutable subject. Exempt paths: `GET /health`, `GET /metrics`.
 - Fail closed: missing artifact or store error → deny (404, don't leak existence).
 - Private by default; identity from a verified token/session; grants bind to immutable subject.
 - Audit is inbuilt (app's own store, hash-chained) — never routed to an external system.
-- App auth + RBAC must be safe standalone on the public internet (no VPN assumed).
+- Deployed behind the VPN ([ADR-0011](docs/adr/0011-vpn-fronted-threat-model.md)); app auth +
+  RBAC + audit are defense-in-depth, not the sole boundary. Per-artifact authz still fails
+  closed and existence is not leaked (kept as cheap defense-in-depth).
 
 ## Key ADRs
 
