@@ -45,9 +45,15 @@ func (s *Server) Routes() http.Handler {
 		_, _ = w.Write([]byte("# metrics: not yet implemented\n"))
 	})
 
-	mux.HandleFunc("GET /login", s.login)      // dev helper: sets the session cookie
-	mux.HandleFunc("GET /a/{slug}", s.viewer)  // viewer shell (no content)
-	mux.HandleFunc("GET /a/{slug}/raw", s.raw) // authz-gated bundle bytes
+	mux.HandleFunc("GET /login", s.login) // dev helper: sets the session cookie
+
+	// Content routes are rate-limited per client IP (120 req/min) to blunt
+	// scraping and brute-force enumeration; /health and /metrics stay unwrapped
+	// so probes never trip the limiter. Auth, CanView, audit, and response
+	// headers all remain enforced inside the wrapped handlers.
+	const contentPerMinute = 120
+	mux.Handle("GET /a/{slug}", rateLimit(http.HandlerFunc(s.viewer), contentPerMinute))  // viewer shell (no content)
+	mux.Handle("GET /a/{slug}/raw", rateLimit(http.HandlerFunc(s.raw), contentPerMinute)) // authz-gated bundle bytes
 	return mux
 }
 
