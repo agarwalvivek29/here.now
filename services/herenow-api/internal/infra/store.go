@@ -181,10 +181,32 @@ func hashEvent(ev *herenowv1.AuditEvent) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// writeJSON atomically replaces path with the JSON encoding of v. It writes to a
+// temp file in the same directory (so os.Rename stays atomic on one filesystem),
+// then renames over the target. A crash leaves either the old or new file intact,
+// never a partial write.
 func writeJSON(path string, v any) error {
 	b, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, b, 0o600)
+	dir, base := filepath.Split(path)
+	tmp, err := os.CreateTemp(dir, base+".tmp-*")
+	if err != nil {
+		return err
+	}
+	// Clean up the temp file on any error before the rename succeeds.
+	defer func() { _ = os.Remove(tmp.Name()) }()
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(b); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
 }
