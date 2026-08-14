@@ -42,6 +42,11 @@ sign-in · render-parity pipeline (esbuild, increment 1) · end-to-end flow test
 ## Findings
 
 - **F-1 (RESOLVED, PR #5)** — `CanView` now matches grantee AND slug (defense-in-depth).
+- **F-2 (RESOLVED, 5368488)** — viewer shell CSP was `default-src 'none'` with no
+  `connect-src`, so the shell's `fetch('/a/{slug}/raw')` was blocked → "Could not load this
+  artifact." Missed by unit/e2e (they hit `/raw` directly, never rendered the shell under CSP).
+  Caught in **live browser QA** against Keycloak. Fixed: added `connect-src 'self'` + a
+  regression test (`viewer_test.go`).
 
 ## Waves (all MERGED ✓, integration green)
 
