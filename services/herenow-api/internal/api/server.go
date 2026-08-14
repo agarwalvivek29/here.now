@@ -194,7 +194,9 @@ func visibilityLabel(v herenowv1.Visibility) string {
 func (s *Server) viewer(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Content-Security-Policy",
-		"default-src 'none'; frame-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'")
+		// connect-src 'self' lets the shell fetch /a/{slug}/raw; without it the
+		// fetch falls back to default-src 'none' and the viewer can't load.
+		"default-src 'none'; connect-src 'self'; frame-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'")
 	_, _ = w.Write([]byte(web.ViewerHTML))
 }
 
