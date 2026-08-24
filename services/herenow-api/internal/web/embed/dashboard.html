@@ -3,53 +3,139 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ArtifactA</title>
+  <title>Your artifacts · ArtifactA</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
   <style>
-    body { margin: 0; background: #fafafa; color: #1a1a1a; font: 15px/1.5 system-ui, sans-serif; }
-    header { display: flex; align-items: baseline; justify-content: space-between; padding: 1rem 1.5rem; border-bottom: 1px solid #e5e5e5; background: #fff; }
-    header h1 { margin: 0; font-size: 1.15rem; }
-    header .who { color: #666; font-size: 0.85rem; }
-    main { max-width: 760px; margin: 0 auto; padding: 1.5rem; }
-    section { margin-bottom: 2rem; }
-    section h2 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; color: #888; margin: 0 0 0.75rem; }
-    ul { list-style: none; margin: 0; padding: 0; }
-    li { display: flex; align-items: center; justify-content: space-between; padding: 0.6rem 0.75rem; background: #fff; border: 1px solid #e5e5e5; border-radius: 6px; margin-bottom: 0.4rem; }
-    li a { color: #0b62d6; text-decoration: none; font-weight: 500; }
-    li a:hover { text-decoration: underline; }
-    .vis { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: #777; background: #f0f0f0; padding: 0.15rem 0.5rem; border-radius: 999px; }
-    .empty { color: #999; font-size: 0.9rem; padding: 0.4rem 0; }
+    :root{
+      --bg:#f4f5fa; --surface:#ffffff; --surface-2:#eef0f7; --ink:#14142b; --muted:#5a5c78;
+      --line:#e4e6f1; --accent:#e8265c; --accent-hover:#c81f4f; --on-accent:#ffffff;
+      --priv:#5b6478; --priv-bg:#eceef3; --inv:#0f857a; --inv-bg:#d8efec; --org:#5a5be0; --org-bg:#e6e6fb;
+      --shadow:0 1px 2px rgba(20,20,43,.05),0 10px 30px -14px rgba(20,20,43,.18);
+      --radius:12px;
+    }
+    @media (prefers-color-scheme:dark){
+      :root{
+        --bg:#0c0c20; --surface:#15153a; --surface-2:#1c1c46; --ink:#eaebf6; --muted:#a3a6c6;
+        --line:#28285010; --line:#292954; --accent:#ff5c82; --accent-hover:#ff789a; --on-accent:#1a0410;
+        --priv:#9aa2ba; --priv-bg:#20263a; --inv:#38c9ba; --inv-bg:#0e332f; --org:#8f90f5; --org-bg:#1f2050;
+        --shadow:0 1px 2px rgba(0,0,0,.4),0 16px 40px -18px rgba(0,0,0,.7);
+      }
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--ink);
+      font-family:"IBM Plex Sans",system-ui,-apple-system,sans-serif;font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+    .mono{font-family:"IBM Plex Mono",ui-monospace,monospace}
+    a{color:inherit;text-decoration:none}
+
+    header{position:sticky;top:0;z-index:5;display:flex;align-items:center;justify-content:space-between;
+      gap:16px;padding:0 24px;height:60px;background:color-mix(in srgb,var(--bg) 88%,transparent);
+      backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+    .brand{display:flex;align-items:center;gap:10px;font-weight:700;letter-spacing:-.01em;font-size:16px}
+    .brand .mark{width:14px;height:14px;border-radius:4px;background:var(--accent);box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 18%,transparent)}
+    .who{display:flex;align-items:center;gap:9px;color:var(--muted);font-size:13px}
+    .who .avatar{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;
+      background:var(--surface-2);border:1px solid var(--line);font-size:11px;font-weight:600;color:var(--ink);text-transform:uppercase}
+
+    main{max-width:860px;margin:0 auto;padding:32px 24px 80px}
+    .section{margin-bottom:34px}
+    .section-head{display:flex;align-items:baseline;gap:10px;margin:0 0 12px}
+    .section-head h2{margin:0;font-family:"IBM Plex Mono",monospace;font-size:12px;font-weight:600;
+      letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+    .count{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--muted);
+      background:var(--surface-2);border:1px solid var(--line);border-radius:999px;padding:1px 8px}
+
+    .list{display:flex;flex-direction:column;gap:8px}
+    .item{display:flex;align-items:center;gap:14px;padding:13px 16px;background:var(--surface);
+      border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);transition:border-color .12s,transform .12s}
+    .item:hover{border-color:color-mix(in srgb,var(--accent) 40%,var(--line))}
+    .item .body{min-width:0;flex:1}
+    .item .title{display:block;font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .item .title:hover{color:var(--accent)}
+    .item .sub{display:flex;align-items:center;gap:8px;margin-top:2px;font-size:12px;color:var(--muted)}
+    .item .slug{font-family:"IBM Plex Mono",monospace}
+    .copy{border:1px solid var(--line);background:var(--surface-2);color:var(--muted);cursor:pointer;
+      font-family:"IBM Plex Mono",monospace;font-size:11px;border-radius:6px;padding:2px 7px;line-height:1.4}
+    .copy:hover{color:var(--ink);border-color:var(--muted)}
+    .copy:focus-visible,.item .title:focus-visible,.btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+    .pill{display:inline-flex;align-items:center;gap:6px;font-family:"IBM Plex Mono",monospace;font-size:11px;
+      font-weight:600;letter-spacing:.03em;text-transform:uppercase;padding:3px 10px;border-radius:999px;white-space:nowrap}
+    .pill::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+    .pill-private{color:var(--priv);background:var(--priv-bg)}
+    .pill-invited{color:var(--inv);background:var(--inv-bg)}
+    .pill-org{color:var(--org);background:var(--org-bg)}
+
+    .empty{display:flex;gap:12px;align-items:flex-start;padding:16px;border:1px dashed var(--line);
+      border-radius:var(--radius);color:var(--muted);font-size:13.5px;background:color-mix(in srgb,var(--surface) 50%,transparent)}
+    .empty code{font-family:"IBM Plex Mono",monospace;font-size:12px;background:var(--surface-2);
+      border:1px solid var(--line);border-radius:5px;padding:1px 6px;color:var(--ink)}
+    .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);opacity:0;
+      background:var(--ink);color:var(--bg);font-size:12.5px;padding:8px 14px;border-radius:8px;
+      transition:opacity .18s,transform .18s;pointer-events:none;font-weight:500}
+    .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
   </style>
 </head>
 <body>
   <header>
-    <h1>ArtifactA</h1>
-    <span class="who">{{.Email}}</span>
+    <div class="brand"><span class="mark"></span> ArtifactA</div>
+    <div class="who"><span>{{.Email}}</span><span class="avatar">{{if .Email}}{{slice .Email 0 1}}{{else}}?{{end}}</span></div>
   </header>
+
   <main>
-    <section>
-      <h2>Mine</h2>
-      {{if .Mine}}
-      <ul>
-        {{range .Mine}}<li><a href="/a/{{.Slug}}">{{.Title}}</a><span class="vis">{{.Visibility}}</span></li>{{end}}
-      </ul>
-      {{else}}<p class="empty">Nothing here yet.</p>{{end}}
-    </section>
-    <section>
-      <h2>Shared with me</h2>
-      {{if .Shared}}
-      <ul>
-        {{range .Shared}}<li><a href="/a/{{.Slug}}">{{.Title}}</a><span class="vis">{{.Visibility}}</span></li>{{end}}
-      </ul>
-      {{else}}<p class="empty">Nothing here yet.</p>{{end}}
-    </section>
-    <section>
-      <h2>Org</h2>
-      {{if .Org}}
-      <ul>
-        {{range .Org}}<li><a href="/a/{{.Slug}}">{{.Title}}</a><span class="vis">{{.Visibility}}</span></li>{{end}}
-      </ul>
-      {{else}}<p class="empty">Nothing here yet.</p>{{end}}
-    </section>
+    {{define "list"}}
+      <div class="list">
+        {{range .}}
+        <div class="item">
+          <div class="body">
+            <a class="title" href="/a/{{.Slug}}">{{.Title}}</a>
+            <div class="sub">
+              <span class="slug">/a/{{.Slug}}</span>
+              <button class="copy" data-slug="{{.Slug}}" type="button">copy link</button>
+            </div>
+          </div>
+          <span class="pill pill-{{.Visibility}}">{{.Visibility}}</span>
+        </div>
+        {{end}}
+      </div>
+    {{end}}
+
+    <div class="section">
+      <div class="section-head"><h2>Mine</h2>{{if .Mine}}<span class="count">{{len .Mine}}</span>{{end}}</div>
+      {{if .Mine}}{{template "list" .Mine}}{{else}}
+      <div class="empty"><div>Nothing published yet. Ship one from your assistant or the CLI:<br><code>herenow publish &lt;file&gt;</code></div></div>
+      {{end}}
+    </div>
+
+    <div class="section">
+      <div class="section-head"><h2>Shared with me</h2>{{if .Shared}}<span class="count">{{len .Shared}}</span>{{end}}</div>
+      {{if .Shared}}{{template "list" .Shared}}{{else}}
+      <div class="empty"><div>When a teammate grants you an artifact, it shows up here.</div></div>
+      {{end}}
+    </div>
+
+    <div class="section">
+      <div class="section-head"><h2>Org</h2>{{if .Org}}<span class="count">{{len .Org}}</span>{{end}}</div>
+      {{if .Org}}{{template "list" .Org}}{{else}}
+      <div class="empty"><div>Nothing is shared org-wide right now.</div></div>
+      {{end}}
+    </div>
   </main>
+
+  <div class="toast" id="toast">Link copied</div>
+  <script>
+    // Copy the absolute artifact link. Storage isn't needed; clipboard is best-effort.
+    const toast = document.getElementById('toast');
+    let t;
+    document.querySelectorAll('.copy').forEach(function(b){
+      b.addEventListener('click', async function(){
+        const url = location.origin + '/a/' + b.dataset.slug;
+        try { await navigator.clipboard.writeText(url); } catch (e) { return; }
+        toast.classList.add('show'); clearTimeout(t);
+        t = setTimeout(function(){ toast.classList.remove('show'); }, 1400);
+      });
+    });
+  </script>
 </body>
 </html>

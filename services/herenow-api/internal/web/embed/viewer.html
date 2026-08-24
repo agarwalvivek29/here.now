@@ -3,39 +3,112 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>here.now</title>
+  <title>ArtifactA</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
   <style>
-    html, body { margin: 0; height: 100%; background: #fff; font: 14px system-ui, sans-serif; }
-    #frame { border: 0; width: 100%; height: 100vh; display: block; }
-    #msg { padding: 2rem; color: #444; }
+    :root{
+      --bg:#f4f5fa; --surface:#ffffff; --ink:#14142b; --muted:#5a5c78; --line:#e4e6f1;
+      --accent:#e8265c; --accent-hover:#c81f4f;
+    }
+    @media (prefers-color-scheme:dark){
+      :root{ --bg:#0c0c20; --surface:#15153a; --ink:#eaebf6; --muted:#a3a6c6; --line:#292954;
+        --accent:#ff5c82; --accent-hover:#ff789a; }
+    }
+    *{box-sizing:border-box}
+    html,body{margin:0;height:100%}
+    body{background:var(--bg);color:var(--ink);
+      font-family:"IBM Plex Sans",system-ui,-apple-system,sans-serif;display:flex;flex-direction:column}
+    .mono{font-family:"IBM Plex Mono",ui-monospace,monospace}
+
+    .bar{flex:none;display:flex;align-items:center;gap:14px;height:48px;padding:0 16px;
+      background:var(--surface);border-bottom:1px solid var(--line)}
+    .brand{display:flex;align-items:center;gap:9px;font-weight:700;font-size:14.5px;letter-spacing:-.01em;color:var(--ink)}
+    .brand .mark{width:13px;height:13px;border-radius:4px;background:var(--accent)}
+    .slug{font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--muted);
+      white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .spacer{flex:1}
+    .chip{display:inline-flex;align-items:center;gap:6px;font-family:"IBM Plex Mono",monospace;font-size:11px;
+      color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:2px 9px}
+    .chip::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--muted)}
+
+    #frame{flex:1;border:0;width:100%;display:none;background:#fff}
+    /* center panel for loading / denied / error */
+    .panel{flex:1;display:none;place-items:center;padding:32px}
+    .panel.show{display:grid}
+    .card{width:min(92vw,420px);text-align:center}
+    .card .icon{width:44px;height:44px;margin:0 auto 16px;color:var(--muted)}
+    .card h1{font-size:19px;letter-spacing:-.01em;margin:0 0 8px;text-wrap:balance}
+    .card p{margin:0 0 20px;color:var(--muted);font-size:14px;line-height:1.55}
+    .actions{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+    .btn{display:inline-flex;align-items:center;gap:8px;padding:9px 15px;border-radius:9px;font:600 13.5px "IBM Plex Sans",sans-serif;
+      text-decoration:none;cursor:pointer;border:1px solid var(--line);color:var(--ink);background:var(--surface)}
+    .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+    .btn.primary:hover{background:var(--accent-hover)}
+    .btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+    .spinner{width:30px;height:30px;border-radius:50%;border:3px solid var(--line);border-top-color:var(--accent);
+      margin:0 auto 14px;animation:spin .8s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    @media (prefers-reduced-motion:reduce){.spinner{animation:none}}
+    .loading-txt{color:var(--muted);font-size:13px;font-family:"IBM Plex Mono",monospace}
   </style>
 </head>
 <body>
-  <!-- v0 viewer: fetches the artifact bytes (server enforces authz on /raw) and
-       renders them in a sandboxed, null-origin iframe. `allow-scripts` WITHOUT
-       `allow-same-origin` isolates each artifact from the app and from other
-       artifacts even under path-based routing. -->
-  <iframe id="frame" sandbox="allow-scripts" referrerpolicy="no-referrer" hidden></iframe>
-  <div id="msg">Loading…</div>
+  <div class="bar">
+    <a class="brand" href="/"><span class="mark"></span> ArtifactA</a>
+    <span class="slug" id="slug"></span>
+    <span class="spacer"></span>
+    <span class="chip">sandboxed</span>
+  </div>
+
+  <!-- loading -->
+  <div class="panel show" id="loading">
+    <div class="card"><div class="spinner"></div><div class="loading-txt">Loading artifact…</div></div>
+  </div>
+
+  <!-- access denied / not found (identical, so existence never leaks) -->
+  <div class="panel" id="denied">
+    <div class="card">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="4" y="10" width="16" height="10" rx="2" stroke="currentColor" stroke-width="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3" stroke="currentColor" stroke-width="2"/></svg>
+      <h1>This artifact is private</h1>
+      <p>You don't have access, or it isn't here. Ask the owner to share it with you — or sign in with a different account.</p>
+      <div class="actions">
+        <a class="btn primary" href="/login">Sign in</a>
+        <a class="btn" href="/">Your artifacts</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- generic error -->
+  <div class="panel" id="error">
+    <div class="card">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M12 7v6M12 16.5v.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <h1>Couldn't load this artifact</h1>
+      <p>Something went wrong reaching the server. Try again in a moment.</p>
+      <div class="actions"><a class="btn" href="/">Your artifacts</a></div>
+    </div>
+  </div>
+
+  <iframe id="frame" sandbox="allow-scripts" referrerpolicy="no-referrer" title="artifact"></iframe>
+
   <script>
     (async () => {
-      const parts = location.pathname.split('/').filter(Boolean); // ["a", "<slug>"]
+      const parts = location.pathname.split('/').filter(Boolean); // ["a","<slug>"]
       const slug = parts[1] || '';
-      const msg = document.getElementById('msg');
+      document.getElementById('slug').textContent = slug ? '/a/' + slug : '';
+      const show = id => {
+        for (const p of ['loading','denied','error']) document.getElementById(p).classList.toggle('show', p === id);
+      };
       const frame = document.getElementById('frame');
       try {
         const res = await fetch('/a/' + encodeURIComponent(slug) + '/raw', { credentials: 'same-origin' });
-        if (!res.ok) {
-          msg.textContent = res.status === 404
-            ? 'This artifact is unavailable, or you do not have access.'
-            : 'Could not load this artifact (' + res.status + ').';
-          return;
-        }
+        if (!res.ok) { show(res.status === 404 ? 'denied' : 'error'); return; }
         frame.srcdoc = await res.text();
-        frame.hidden = false;
-        msg.remove();
+        show(null);                 // hide all panels
+        frame.style.display = 'block';
       } catch (e) {
-        msg.textContent = 'Could not load this artifact.';
+        show('error');
       }
     })();
   </script>

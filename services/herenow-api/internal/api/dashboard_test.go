@@ -116,8 +116,8 @@ func TestDashboardUnauthenticatedRendersSignin(t *testing.T) {
 		t.Fatalf("sign-in: got %d, want 200", rr.Code)
 	}
 	body := rr.Body.String()
-	if !strings.Contains(body, "Sign in to ArtifactA") {
-		t.Fatalf("sign-in landing not rendered:\n%s", body)
+	if !strings.Contains(body, "ArtifactA") {
+		t.Fatalf("sign-in landing not rendered (brand missing):\n%s", body)
 	}
 	if !strings.Contains(body, `href="/login"`) {
 		t.Fatalf("sign-in page missing link to /login:\n%s", body)

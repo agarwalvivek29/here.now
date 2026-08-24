@@ -221,7 +221,9 @@ func TestEndToEndPublishViewShareAuditFlow(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("root as anonymous: got %d, want 200", code)
 	}
-	if !strings.Contains(landing, "Sign in to ArtifactA") {
+	// The sign-in page's stable contract: branded, with a sign-in affordance
+	// pointing at /login. Assert that, not the marketing copy (which changes).
+	if !strings.Contains(landing, `href="/login"`) || !strings.Contains(landing, "ArtifactA") {
 		t.Fatalf("anonymous root is not the sign-in page: %s", landing)
 	}
 	if strings.Contains(landing, "<h2>Mine</h2>") {
