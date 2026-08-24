@@ -5,6 +5,12 @@ description: Publish, host, or share an artifact on ArtifactA (a self-hosted her
 
 # Publish an artifact to ArtifactA
 
+> **Design it first.** Before publishing anything you just authored, load the
+> **`artifacta-design`** skill — it keeps the artifact from looking like the LLM default and,
+> critically, keeps it valid inside ArtifactA's sandbox (no `eval`/Tailwind-Play-CDN, storage
+> APIs throw, single file, no phone-home). Publishing a broken or bare artifact is a miss even
+> when the upload succeeds.
+
 ## What ArtifactA is
 
 ArtifactA (the `here.now` server) is a **self-hostable, access-controlled, audited host for
