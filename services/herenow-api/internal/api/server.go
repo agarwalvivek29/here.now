@@ -194,9 +194,15 @@ func visibilityLabel(v herenowv1.Visibility) string {
 func (s *Server) viewer(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Content-Security-Policy",
-		// connect-src 'self' lets the shell fetch /a/{slug}/raw; without it the
-		// fetch falls back to default-src 'none' and the viewer can't load.
-		"default-src 'none'; connect-src 'self'; frame-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'")
+		// The srcdoc'd artifact inherits this policy. Egress is allowed (the
+		// deployment is private on ingress, not egress): artifacts may pull
+		// fonts/styles/scripts/data from https hosts. connect-src 'self' covers
+		// the shell's own fetch of /a/{slug}/raw. frame-src 'self' keeps the
+		// srcdoc iframe. The sandbox (no allow-same-origin) still isolates the
+		// artifact from the app origin and its cookies.
+		"default-src 'none'; connect-src 'self' https:; frame-src 'self'; "+
+			"img-src https: data:; font-src https: data:; "+
+			"style-src 'unsafe-inline' https:; script-src 'unsafe-inline' https:")
 	_, _ = w.Write([]byte(web.ViewerHTML))
 }
 
@@ -244,7 +250,11 @@ func (s *Server) raw(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", ct)
 	w.Header().Set("Content-Security-Policy",
-		"sandbox allow-scripts; default-src 'none'; img-src data: https:; style-src 'unsafe-inline'; script-src 'unsafe-inline'")
+		// Egress allowed (private on ingress, not egress); sandbox (no
+		// allow-same-origin) keeps the artifact a null origin, isolated from the
+		// app origin + cookies. Applies when /raw is opened as a document directly.
+		"sandbox allow-scripts; default-src 'none'; img-src https: data:; font-src https: data:; "+
+			"style-src 'unsafe-inline' https:; script-src 'unsafe-inline' https:; connect-src https:")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	_, _ = io.Copy(w, rc)
 }
