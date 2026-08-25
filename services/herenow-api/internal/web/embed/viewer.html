@@ -123,16 +123,26 @@
       const viewing = document.getElementById('viewing');
 
       // loadVersion swaps the iframe to version n's raw content (same sandbox).
+      // The spinner stays up until the new version has actually painted (the
+      // iframe's load event) so switching never flashes a blank white screen.
       const loadVersion = async (n) => {
         show('loading');
         frame.style.display = 'none';
         try {
           const res = await fetch('/a/' + encodeURIComponent(slug) + '/v/' + n + '/raw', { credentials: 'same-origin' });
           if (!res.ok) { show(res.status === 404 ? 'denied' : 'error'); return; }
-          frame.srcdoc = await res.text();
-          show(null);               // hide all panels
-          frame.style.display = 'block';
-          if (vswitch.classList.contains('show')) viewing.textContent = 'viewing v' + n;
+          const html = await res.text();
+          const reveal = () => {
+            show(null);             // hide all panels
+            frame.style.display = 'block';
+            if (vswitch.classList.contains('show')) viewing.textContent = 'viewing v' + n;
+          };
+          // Reveal on load; a fallback timer guards against a missed load event.
+          let revealed = false;
+          const once = () => { if (!revealed) { revealed = true; reveal(); } };
+          frame.onload = once;
+          setTimeout(once, 4000);
+          frame.srcdoc = html;
         } catch (e) {
           show('error');
         }
