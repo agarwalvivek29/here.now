@@ -386,6 +386,111 @@ func (x *Grant) GetCreatedAt() *timestamppb.Timestamp {
 	return nil
 }
 
+// Comment is one piece of review feedback on an artifact, pinned to the version
+// it was made on (ADR-0014). Anyone who can view the artifact may comment; only
+// the owner resolves. Comments are collaboration content, NOT access-control
+// events, so they are never written to the hash-chained audit trail. The body is
+// user content and MUST be rendered as text (never innerHTML) in the viewer.
+type Comment struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Slug          string                 `protobuf:"bytes,2,opt,name=slug,proto3" json:"slug,omitempty"`
+	Version       int32                  `protobuf:"varint,3,opt,name=version,proto3" json:"version,omitempty"`
+	AuthorSub     string                 `protobuf:"bytes,4,opt,name=author_sub,json=authorSub,proto3" json:"author_sub,omitempty"`
+	AuthorEmail   string                 `protobuf:"bytes,5,opt,name=author_email,json=authorEmail,proto3" json:"author_email,omitempty"`
+	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	Body          string                 `protobuf:"bytes,7,opt,name=body,proto3" json:"body,omitempty"`
+	Resolved      bool                   `protobuf:"varint,8,opt,name=resolved,proto3" json:"resolved,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Comment) Reset() {
+	*x = Comment{}
+	mi := &file_herenow_v1_artifact_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Comment) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Comment) ProtoMessage() {}
+
+func (x *Comment) ProtoReflect() protoreflect.Message {
+	mi := &file_herenow_v1_artifact_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Comment.ProtoReflect.Descriptor instead.
+func (*Comment) Descriptor() ([]byte, []int) {
+	return file_herenow_v1_artifact_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *Comment) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *Comment) GetSlug() string {
+	if x != nil {
+		return x.Slug
+	}
+	return ""
+}
+
+func (x *Comment) GetVersion() int32 {
+	if x != nil {
+		return x.Version
+	}
+	return 0
+}
+
+func (x *Comment) GetAuthorSub() string {
+	if x != nil {
+		return x.AuthorSub
+	}
+	return ""
+}
+
+func (x *Comment) GetAuthorEmail() string {
+	if x != nil {
+		return x.AuthorEmail
+	}
+	return ""
+}
+
+func (x *Comment) GetCreatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return nil
+}
+
+func (x *Comment) GetBody() string {
+	if x != nil {
+		return x.Body
+	}
+	return ""
+}
+
+func (x *Comment) GetResolved() bool {
+	if x != nil {
+		return x.Resolved
+	}
+	return false
+}
+
 var File_herenow_v1_artifact_proto protoreflect.FileDescriptor
 
 const file_herenow_v1_artifact_proto_rawDesc = "" +
@@ -422,7 +527,18 @@ const file_herenow_v1_artifact_proto_rawDesc = "" +
 	"\n" +
 	"granted_by\x18\x03 \x01(\tR\tgrantedBy\x129\n" +
 	"\n" +
-	"created_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt*l\n" +
+	"created_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\"\xf4\x01\n" +
+	"\aComment\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x04slug\x18\x02 \x01(\tR\x04slug\x12\x18\n" +
+	"\aversion\x18\x03 \x01(\x05R\aversion\x12\x1d\n" +
+	"\n" +
+	"author_sub\x18\x04 \x01(\tR\tauthorSub\x12!\n" +
+	"\fauthor_email\x18\x05 \x01(\tR\vauthorEmail\x129\n" +
+	"\n" +
+	"created_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12\x12\n" +
+	"\x04body\x18\a \x01(\tR\x04body\x12\x1a\n" +
+	"\bresolved\x18\b \x01(\bR\bresolved*l\n" +
 	"\n" +
 	"Visibility\x12\x1a\n" +
 	"\x16VISIBILITY_UNSPECIFIED\x10\x00\x12\x16\n" +
@@ -446,25 +562,27 @@ func file_herenow_v1_artifact_proto_rawDescGZIP() []byte {
 }
 
 var file_herenow_v1_artifact_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_herenow_v1_artifact_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_herenow_v1_artifact_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_herenow_v1_artifact_proto_goTypes = []any{
 	(Visibility)(0),               // 0: herenow.v1.Visibility
 	(*Identity)(nil),              // 1: herenow.v1.Identity
 	(*Artifact)(nil),              // 2: herenow.v1.Artifact
 	(*ArtifactVersion)(nil),       // 3: herenow.v1.ArtifactVersion
 	(*Grant)(nil),                 // 4: herenow.v1.Grant
-	(*timestamppb.Timestamp)(nil), // 5: google.protobuf.Timestamp
+	(*Comment)(nil),               // 5: herenow.v1.Comment
+	(*timestamppb.Timestamp)(nil), // 6: google.protobuf.Timestamp
 }
 var file_herenow_v1_artifact_proto_depIdxs = []int32{
 	0, // 0: herenow.v1.Artifact.visibility:type_name -> herenow.v1.Visibility
-	5, // 1: herenow.v1.Artifact.created_at:type_name -> google.protobuf.Timestamp
-	5, // 2: herenow.v1.ArtifactVersion.created_at:type_name -> google.protobuf.Timestamp
-	5, // 3: herenow.v1.Grant.created_at:type_name -> google.protobuf.Timestamp
-	4, // [4:4] is the sub-list for method output_type
-	4, // [4:4] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	6, // 1: herenow.v1.Artifact.created_at:type_name -> google.protobuf.Timestamp
+	6, // 2: herenow.v1.ArtifactVersion.created_at:type_name -> google.protobuf.Timestamp
+	6, // 3: herenow.v1.Grant.created_at:type_name -> google.protobuf.Timestamp
+	6, // 4: herenow.v1.Comment.created_at:type_name -> google.protobuf.Timestamp
+	5, // [5:5] is the sub-list for method output_type
+	5, // [5:5] is the sub-list for method input_type
+	5, // [5:5] is the sub-list for extension type_name
+	5, // [5:5] is the sub-list for extension extendee
+	0, // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_herenow_v1_artifact_proto_init() }
@@ -478,7 +596,7 @@ func file_herenow_v1_artifact_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_herenow_v1_artifact_proto_rawDesc), len(file_herenow_v1_artifact_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   4,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

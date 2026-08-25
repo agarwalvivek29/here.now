@@ -61,6 +61,54 @@
     @keyframes spin{to{transform:rotate(360deg)}}
     @media (prefers-reduced-motion:reduce){.spinner{animation:none}}
     .loading-txt{color:var(--muted);font-size:13px;font-family:"IBM Plex Mono",monospace}
+
+    /* comments toggle in the top bar */
+    .cbtn{display:inline-flex;align-items:center;gap:6px;font:600 12px "IBM Plex Sans",sans-serif;color:var(--ink);
+      background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:4px 10px;cursor:pointer}
+    .cbtn:hover{border-color:var(--muted)}
+    .cbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+    .cbtn svg{width:14px;height:14px}
+    .cbtn .count{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--muted);
+      background:var(--bg);border-radius:999px;padding:0 6px;min-width:18px;text-align:center}
+    .cbtn.active{border-color:var(--accent);color:var(--accent)}
+    .cbtn.active .count{color:var(--accent)}
+
+    /* comments drawer */
+    .drawer{position:fixed;top:48px;right:0;bottom:0;width:340px;max-width:92vw;z-index:20;
+      background:var(--surface);border-left:1px solid var(--line);display:flex;flex-direction:column;
+      transform:translateX(100%);transition:transform .2s ease;box-shadow:-8px 0 30px rgba(10,10,30,.10)}
+    .drawer.open{transform:translateX(0)}
+    @media (prefers-reduced-motion:reduce){.drawer{transition:none}}
+    .drawer-head{flex:none;display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line)}
+    .drawer-head h2{margin:0;font-size:13.5px;font-weight:700;letter-spacing:-.01em}
+    .drawer-head .vtag{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--muted)}
+    .drawer-close{margin-left:auto;background:none;border:0;color:var(--muted);cursor:pointer;font-size:20px;
+      line-height:1;padding:2px 6px;border-radius:6px}
+    .drawer-close:hover{color:var(--ink);background:var(--bg)}
+    .drawer-close:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+    .clist{flex:1;overflow-y:auto;padding:12px 14px;display:flex;flex-direction:column;gap:12px}
+    .cempty{color:var(--muted);font-size:12.5px;text-align:center;margin-top:24px;line-height:1.5}
+    .citem{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--bg)}
+    .citem.resolved{opacity:.62}
+    .cmeta{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+    .cmeta .cauthor{font-size:12px;font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .cmeta .ctime{font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--muted);margin-left:auto;white-space:nowrap}
+    .cbody{font-size:13px;line-height:1.5;color:var(--ink);white-space:pre-wrap;word-break:break-word}
+    .cbadge{display:inline-flex;align-items:center;font-family:"IBM Plex Mono",monospace;font-size:10px;
+      color:#1a7f52;background:rgba(26,127,82,.12);border-radius:999px;padding:1px 7px}
+    @media (prefers-color-scheme:dark){.cbadge{color:#63d29b;background:rgba(99,210,155,.14)}}
+    .cresolve{margin-top:8px;background:none;border:1px solid var(--line);color:var(--muted);cursor:pointer;
+      font:600 11px "IBM Plex Sans",sans-serif;border-radius:7px;padding:3px 9px}
+    .cresolve:hover{border-color:var(--accent);color:var(--accent)}
+    .cresolve:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+    .composer{flex:none;border-top:1px solid var(--line);padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+    .composer textarea{width:100%;min-height:60px;max-height:160px;resize:vertical;font:400 13px "IBM Plex Sans",sans-serif;
+      color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:8px 10px}
+    .composer textarea:focus-visible{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
+    .composer .crow{display:flex;align-items:center;gap:10px}
+    .composer .chint{font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--muted)}
+    .composer .cpost{margin-left:auto}
+    .cpost[disabled]{opacity:.5;cursor:not-allowed}
   </style>
 </head>
 <body>
@@ -73,8 +121,29 @@
       <label for="vselect">version</label>
       <select id="vselect" aria-label="Select artifact version"></select>
     </div>
+    <button class="cbtn" id="cbtn" type="button" aria-expanded="false" aria-controls="drawer" hidden>
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 5h16v11H8l-4 3V5Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+      Comments <span class="count" id="ccount">0</span>
+    </button>
     <span class="chip">sandboxed</span>
   </div>
+
+  <!-- comments drawer (ADR-0014): version-pinned review feedback -->
+  <aside class="drawer" id="drawer" aria-label="Comments" aria-hidden="true">
+    <div class="drawer-head">
+      <h2>Comments</h2>
+      <span class="vtag" id="cdrawerv"></span>
+      <button class="drawer-close" id="cclose" type="button" aria-label="Close comments">&times;</button>
+    </div>
+    <div class="clist" id="clist"></div>
+    <form class="composer" id="composer">
+      <textarea id="cinput" placeholder="Leave a comment on this version…" aria-label="Comment body" maxlength="4000"></textarea>
+      <div class="crow">
+        <span class="chint" id="cerr"></span>
+        <button class="btn primary cpost" id="cpost" type="submit">Comment</button>
+      </div>
+    </form>
+  </aside>
 
   <!-- loading -->
   <div class="panel show" id="loading">
@@ -109,7 +178,10 @@
   <script>
     // Metadata-first load: fetch the authorized metadata, then load the content
     // of the current version into the sandboxed iframe. A version switcher lets
-    // the viewer flip between immutable versions without leaving the page.
+    // the viewer flip between immutable versions without leaving the page, and a
+    // comments drawer (ADR-0014) shows the feedback pinned to the version being
+    // viewed. Comment bodies are USER CONTENT — always rendered via textContent,
+    // never innerHTML.
     (async () => {
       const parts = location.pathname.split('/').filter(Boolean); // ["a","<slug>"]
       const slug = parts[1] || '';
@@ -122,12 +194,135 @@
       const vselect = document.getElementById('vselect');
       const viewing = document.getElementById('viewing');
 
+      // Comments drawer state and elements.
+      const cbtn = document.getElementById('cbtn');
+      const ccount = document.getElementById('ccount');
+      const drawer = document.getElementById('drawer');
+      const cclose = document.getElementById('cclose');
+      const clist = document.getElementById('clist');
+      const cdrawerv = document.getElementById('cdrawerv');
+      const composer = document.getElementById('composer');
+      const cinput = document.getElementById('cinput');
+      const cpost = document.getElementById('cpost');
+      const cerr = document.getElementById('cerr');
+      let currentVersion = 1;
+      let isOwner = false;
+
+      const shortTime = iso => {
+        if (!iso) return '';
+        const d = new Date(iso);
+        if (isNaN(d)) return '';
+        return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+      };
+
+      // renderComments paints the list for the current version. Bodies go in via
+      // textContent so user content can never inject markup.
+      const renderComments = comments => {
+        clist.textContent = '';
+        if (!comments.length) {
+          const empty = document.createElement('div');
+          empty.className = 'cempty';
+          empty.textContent = 'No comments on v' + currentVersion + ' yet. Start the conversation below.';
+          clist.appendChild(empty);
+          return;
+        }
+        for (const c of comments) {
+          const item = document.createElement('div');
+          item.className = 'citem' + (c.resolved ? ' resolved' : '');
+
+          const meta = document.createElement('div');
+          meta.className = 'cmeta';
+          const author = document.createElement('span');
+          author.className = 'cauthor';
+          author.textContent = c.author_email || 'someone';
+          meta.appendChild(author);
+          if (c.resolved) {
+            const badge = document.createElement('span');
+            badge.className = 'cbadge';
+            badge.textContent = 'resolved';
+            meta.appendChild(badge);
+          }
+          const time = document.createElement('span');
+          time.className = 'ctime';
+          time.textContent = shortTime(c.created_at);
+          meta.appendChild(time);
+          item.appendChild(meta);
+
+          const body = document.createElement('div');
+          body.className = 'cbody';
+          body.textContent = c.body || '';   // USER CONTENT — text only
+          item.appendChild(body);
+
+          if (isOwner && !c.resolved) {
+            const btn = document.createElement('button');
+            btn.className = 'cresolve';
+            btn.type = 'button';
+            btn.textContent = 'Resolve';
+            btn.addEventListener('click', async () => {
+              btn.disabled = true;
+              try {
+                const res = await fetch('/artifacts/' + encodeURIComponent(slug) + '/comments/' +
+                  encodeURIComponent(c.id) + '/resolve', { method: 'POST', credentials: 'same-origin' });
+                if (res.ok) { await refreshComments(currentVersion); }
+                else { btn.disabled = false; }
+              } catch (e) { btn.disabled = false; }
+            });
+            item.appendChild(btn);
+          }
+          clist.appendChild(item);
+        }
+      };
+
+      // refreshComments loads the current version's comments and updates the
+      // list (when the drawer is open) and the top-bar count.
+      const refreshComments = async (n) => {
+        try {
+          const res = await fetch('/artifacts/' + encodeURIComponent(slug) + '/comments?version=' + n,
+            { credentials: 'same-origin' });
+          if (!res.ok) return;
+          const comments = await res.json();
+          ccount.textContent = String(comments.length);
+          if (drawer.classList.contains('open')) renderComments(comments);
+        } catch (e) { /* leave the last-known count in place */ }
+      };
+
+      const openDrawer = (open) => {
+        drawer.classList.toggle('open', open);
+        cbtn.classList.toggle('active', open);
+        cbtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        drawer.setAttribute('aria-hidden', open ? 'false' : 'true');
+        if (open) { cdrawerv.textContent = 'v' + currentVersion; refreshComments(currentVersion); }
+      };
+      cbtn.addEventListener('click', () => openDrawer(!drawer.classList.contains('open')));
+      cclose.addEventListener('click', () => openDrawer(false));
+
+      composer.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const body = cinput.value.trim();
+        cerr.textContent = '';
+        if (!body) { cerr.textContent = 'Comment can’t be empty.'; return; }
+        cpost.disabled = true;
+        try {
+          const res = await fetch('/artifacts/' + encodeURIComponent(slug) + '/comments', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ body, version: currentVersion }),
+          });
+          if (res.ok) { cinput.value = ''; await refreshComments(currentVersion); }
+          else { cerr.textContent = res.status === 404 ? 'You can’t comment here.' : 'Couldn’t post. Try again.'; }
+        } catch (e) { cerr.textContent = 'Couldn’t post. Try again.'; }
+        finally { cpost.disabled = false; }
+      });
+
       // loadVersion swaps the iframe to version n's raw content (same sandbox).
       // The spinner stays up until the new version has actually painted (the
       // iframe's load event) so switching never flashes a blank white screen.
+      // It also re-pins the comments drawer + count to the newly-selected version.
       const loadVersion = async (n) => {
         show('loading');
         frame.style.display = 'none';
+        currentVersion = n;
+        cdrawerv.textContent = 'v' + n;
         try {
           const res = await fetch('/a/' + encodeURIComponent(slug) + '/v/' + n + '/raw', { credentials: 'same-origin' });
           if (!res.ok) { show(res.status === 404 ? 'denied' : 'error'); return; }
@@ -145,7 +340,10 @@
           frame.srcdoc = html;
         } catch (e) {
           show('error');
+          return;
         }
+        // Refresh the comment count (and the open drawer) for this version.
+        refreshComments(n);
       };
 
       try {
@@ -153,6 +351,7 @@
         if (!meta.ok) { show(meta.status === 404 ? 'denied' : 'error'); return; }
         const data = await meta.json();
         const latest = data.latest_version || 1;
+        isOwner = !!data.is_owner;
 
         // Only offer a switcher when more than one version exists.
         if (latest > 1 && Array.isArray(data.versions)) {
@@ -168,6 +367,9 @@
           vswitch.classList.add('show');
           vselect.addEventListener('change', () => loadVersion(Number(vselect.value)));
         }
+
+        // The artifact is viewable (metadata succeeded), so surface comments.
+        cbtn.hidden = false;
 
         await loadVersion(latest);
       } catch (e) {
