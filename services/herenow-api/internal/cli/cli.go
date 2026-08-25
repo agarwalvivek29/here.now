@@ -36,7 +36,10 @@ const usage = `here.now — self-hostable host for AI-generated artifacts
 
 Usage:
   herenow login             set up your local identity + session token
-  herenow publish <file>    publish an artifact, print its link
+  herenow publish <file>    publish a new artifact, print its link
+  herenow publish --update <slug> <file>
+                            append a new version to an existing artifact
+  herenow versions <slug>   list an artifact's versions
   herenow share <slug> <grantee-sub>
                             share an artifact with a subject (sets visibility to invited)
   herenow ls                list your artifacts
@@ -56,6 +59,8 @@ func Run(args []string) error {
 		return login()
 	case "publish":
 		return publish(args[1:])
+	case "versions":
+		return versions(args[1:])
 	case "share":
 		return share(args[1:])
 	case "ls":
@@ -252,18 +257,47 @@ func openBrowser(target string) error {
 }
 
 func publish(args []string) error {
-	if len(args) < 1 {
-		return fmt.Errorf("usage: herenow publish <file>")
+	// Parse an optional `--update <slug>` flag; it may appear before or after the
+	// file path. Everything else is treated as the positional <file> argument.
+	var updateSlug, path string
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--update" {
+			if i+1 >= len(args) {
+				return fmt.Errorf("usage: herenow publish --update <slug> <file>")
+			}
+			updateSlug = args[i+1]
+			i++
+			continue
+		}
+		if path == "" {
+			path = args[i]
+		}
+	}
+	if path == "" {
+		return fmt.Errorf("usage: herenow publish [--update <slug>] <file>")
 	}
 	c, err := config.Load()
 	if err != nil {
 		return err
 	}
 
+	// Update mode: append a new immutable version to an existing artifact.
+	if updateSlug != "" {
+		if c.BaseURL == "" || c.AccessToken == "" {
+			return fmt.Errorf("publish --update requires a remote server + login")
+		}
+		n, link, err := addVersionRemote(c.BaseURL, c.AccessToken, updateSlug, path)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("v%d → %s\n", n, link)
+		return nil
+	}
+
 	// Remote API mode: a server is targeted and we hold an access token — POST
 	// the file over HTTP with the id_token as a Bearer credential.
 	if c.BaseURL != "" && c.AccessToken != "" {
-		link, err := publishRemote(c.BaseURL, c.AccessToken, args[0])
+		link, err := publishRemote(c.BaseURL, c.AccessToken, path)
 		if err != nil {
 			return err
 		}
@@ -275,7 +309,7 @@ func publish(args []string) error {
 	if c.Sub == "" {
 		return fmt.Errorf("not logged in — run: herenow login")
 	}
-	f, err := os.Open(args[0])
+	f, err := os.Open(path)
 	if err != nil {
 		return err
 	}
@@ -289,7 +323,7 @@ func publish(args []string) error {
 	art := &herenowv1.Artifact{
 		Slug:          domain.NewSlug(),
 		OwnerSub:      c.Sub,
-		Title:         filepath.Base(args[0]),
+		Title:         filepath.Base(path),
 		Visibility:    herenowv1.Visibility_VISIBILITY_PRIVATE, // private by default
 		ContentType:   "text/html; charset=utf-8",
 		CreatedAt:     now,
@@ -354,6 +388,117 @@ func publishRemote(baseURL, token, path string) (string, error) {
 		return "", fmt.Errorf("decode publish response: %w", err)
 	}
 	return out.URL, nil
+}
+
+// addVersionRemote POSTs the file at path to <baseURL>/artifacts/<slug>/versions
+// with `Authorization: Bearer <token>` and returns the new version number and
+// URL from the JSON response {slug, version, url}. Mirrors publishRemote and is
+// unit-testable against an httptest.Server.
+func addVersionRemote(baseURL, token, slug, path string) (int, string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, "", err
+	}
+	defer f.Close()
+
+	endpoint := strings.TrimSuffix(baseURL, "/") + "/artifacts/" + url.PathEscape(slug) + "/versions"
+	req, err := http.NewRequest(http.MethodPost, endpoint, f)
+	if err != nil {
+		return 0, "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "text/html; charset=utf-8")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return 0, "", fmt.Errorf("add-version failed: %s: %s", resp.Status, strings.TrimSpace(string(body)))
+	}
+
+	var out struct {
+		Slug    string `json:"slug"`
+		Version int    `json:"version"`
+		URL     string `json:"url"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return 0, "", fmt.Errorf("decode add-version response: %w", err)
+	}
+	return out.Version, out.URL, nil
+}
+
+// metadata mirrors the authorized metadata projection served by
+// GET /artifacts/<slug>: enough for the CLI to list versions.
+type metadata struct {
+	Slug          string `json:"slug"`
+	Title         string `json:"title"`
+	Visibility    string `json:"visibility"`
+	LatestVersion int    `json:"latest_version"`
+	IsOwner       bool   `json:"is_owner"`
+	Versions      []struct {
+		N         int    `json:"n"`
+		CreatedAt string `json:"created_at"`
+		CreatedBy string `json:"created_by"`
+		Note      string `json:"note"`
+	} `json:"versions"`
+}
+
+// fetchMetadata GETs <baseURL>/artifacts/<slug> with `Authorization: Bearer
+// <token>` and decodes the authorized metadata projection. Unit-testable
+// against an httptest.Server.
+func fetchMetadata(baseURL, token, slug string) (metadata, error) {
+	var m metadata
+	endpoint := strings.TrimSuffix(baseURL, "/") + "/artifacts/" + url.PathEscape(slug)
+	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	if err != nil {
+		return m, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return m, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return m, fmt.Errorf("metadata failed: %s: %s", resp.Status, strings.TrimSpace(string(body)))
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&m); err != nil {
+		return m, fmt.Errorf("decode metadata response: %w", err)
+	}
+	return m, nil
+}
+
+// versions lists an artifact's versions (newest first as returned by the
+// server), printing `v<n>  <created_at>  <note>` per line.
+func versions(args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("usage: herenow versions <slug>")
+	}
+	slug := args[0]
+	c, err := config.Load()
+	if err != nil {
+		return err
+	}
+	if c.BaseURL == "" || c.AccessToken == "" {
+		return fmt.Errorf("herenow versions requires a remote server + login")
+	}
+	m, err := fetchMetadata(c.BaseURL, c.AccessToken, slug)
+	if err != nil {
+		return err
+	}
+	if len(m.Versions) == 0 {
+		fmt.Printf("no versions for %s\n", slug)
+		return nil
+	}
+	for _, v := range m.Versions {
+		fmt.Printf("v%d  %s  %s\n", v.N, v.CreatedAt, v.Note)
+	}
+	return nil
 }
 
 // share grants a subject access to an artifact (FR12, FR13). A PRIVATE artifact

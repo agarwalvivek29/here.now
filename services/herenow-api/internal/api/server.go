@@ -189,6 +189,7 @@ func toView(a *herenowv1.Artifact) web.ArtifactView {
 		Slug:       a.GetSlug(),
 		Title:      a.GetTitle(),
 		Visibility: visibilityLabel(a.GetVisibility()),
+		Version:    a.GetLatestVersion(),
 	}
 }
 
