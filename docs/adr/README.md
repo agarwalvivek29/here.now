@@ -77,6 +77,7 @@ ADRs are **never deleted**. They are a historical record.
 | [0010](./0010-render-parity-harness.md)               | Viewer render-parity harness (bundle-at-publish leading)                                  | Proposed | 2026-08-12 |
 | [0011](./0011-vpn-fronted-threat-model.md)            | VPN-fronted deployment threat model (amends "no VPN assumed")                             | Accepted | 2026-08-12 |
 | [0012](./0012-assistant-agnostic-publish-surfaces.md) | Assistant-agnostic publish surfaces (API + CLI + MCP + Skill)                             | Accepted | 2026-08-12 |
+| [0013](./0013-artifact-versioning.md)                 | Artifact versioning: immutable versions, explicit `--update`                              | Accepted | 2026-08-25 |
 
 ---
 
