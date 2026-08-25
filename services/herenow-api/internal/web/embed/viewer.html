@@ -33,6 +33,15 @@
       color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:2px 9px}
     .chip::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--muted)}
 
+    .viewing{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--muted);white-space:nowrap}
+    .vswitch{display:none;align-items:center;gap:7px}
+    .vswitch.show{display:inline-flex}
+    .vswitch label{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--muted)}
+    .vswitch select{font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--ink);background:var(--surface);
+      border:1px solid var(--line);border-radius:7px;padding:3px 8px;cursor:pointer}
+    .vswitch select:hover{border-color:var(--muted)}
+    .vswitch select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
     #frame{flex:1;border:0;width:100%;display:none;background:#fff}
     /* center panel for loading / denied / error */
     .panel{flex:1;display:none;place-items:center;padding:32px}
@@ -59,6 +68,11 @@
     <a class="brand" href="/"><span class="mark"></span> ArtifactA</a>
     <span class="slug" id="slug"></span>
     <span class="spacer"></span>
+    <span class="viewing" id="viewing"></span>
+    <div class="vswitch" id="vswitch">
+      <label for="vselect">version</label>
+      <select id="vselect" aria-label="Select artifact version"></select>
+    </div>
     <span class="chip">sandboxed</span>
   </div>
 
@@ -93,6 +107,9 @@
   <iframe id="frame" sandbox="allow-scripts" referrerpolicy="no-referrer" title="artifact"></iframe>
 
   <script>
+    // Metadata-first load: fetch the authorized metadata, then load the content
+    // of the current version into the sandboxed iframe. A version switcher lets
+    // the viewer flip between immutable versions without leaving the page.
     (async () => {
       const parts = location.pathname.split('/').filter(Boolean); // ["a","<slug>"]
       const slug = parts[1] || '';
@@ -101,12 +118,48 @@
         for (const p of ['loading','denied','error']) document.getElementById(p).classList.toggle('show', p === id);
       };
       const frame = document.getElementById('frame');
+      const vswitch = document.getElementById('vswitch');
+      const vselect = document.getElementById('vselect');
+      const viewing = document.getElementById('viewing');
+
+      // loadVersion swaps the iframe to version n's raw content (same sandbox).
+      const loadVersion = async (n) => {
+        show('loading');
+        frame.style.display = 'none';
+        try {
+          const res = await fetch('/a/' + encodeURIComponent(slug) + '/v/' + n + '/raw', { credentials: 'same-origin' });
+          if (!res.ok) { show(res.status === 404 ? 'denied' : 'error'); return; }
+          frame.srcdoc = await res.text();
+          show(null);               // hide all panels
+          frame.style.display = 'block';
+          if (vswitch.classList.contains('show')) viewing.textContent = 'viewing v' + n;
+        } catch (e) {
+          show('error');
+        }
+      };
+
       try {
-        const res = await fetch('/a/' + encodeURIComponent(slug) + '/raw', { credentials: 'same-origin' });
-        if (!res.ok) { show(res.status === 404 ? 'denied' : 'error'); return; }
-        frame.srcdoc = await res.text();
-        show(null);                 // hide all panels
-        frame.style.display = 'block';
+        const meta = await fetch('/artifacts/' + encodeURIComponent(slug), { credentials: 'same-origin' });
+        if (!meta.ok) { show(meta.status === 404 ? 'denied' : 'error'); return; }
+        const data = await meta.json();
+        const latest = data.latest_version || 1;
+
+        // Only offer a switcher when more than one version exists.
+        if (latest > 1 && Array.isArray(data.versions)) {
+          const sorted = data.versions.slice().sort((a, b) => b.n - a.n); // newest first
+          for (const v of sorted) {
+            const opt = document.createElement('option');
+            opt.value = v.n;
+            const date = v.created_at ? new Date(v.created_at).toLocaleDateString() : '';
+            opt.textContent = 'v' + v.n + (date ? ' · ' + date : '');
+            vselect.appendChild(opt);
+          }
+          vselect.value = String(latest);
+          vswitch.classList.add('show');
+          vselect.addEventListener('change', () => loadVersion(Number(vselect.value)));
+        }
+
+        await loadVersion(latest);
       } catch (e) {
         show('error');
       }

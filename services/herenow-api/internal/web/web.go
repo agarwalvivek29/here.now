@@ -33,6 +33,7 @@ type ArtifactView struct {
 	Slug       string
 	Title      string
 	Visibility string
+	Version    int32
 }
 
 // DashboardData is the view model for the authenticated dashboard, grouping the
