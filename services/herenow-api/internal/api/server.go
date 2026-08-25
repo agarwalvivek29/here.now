@@ -74,6 +74,7 @@ func (s *Server) Routes() http.Handler {
 	} else {
 		mux.HandleFunc("GET /login", s.login) // dev helper: sets the session cookie
 	}
+	mux.HandleFunc("GET /logout", s.logout) // clears the local session cookie
 
 	// Content routes are rate-limited per client IP (120 req/min) to blunt
 	// scraping and brute-force enumeration; /health and /metrics stay unwrapped
@@ -191,6 +192,18 @@ func visibilityLabel(v herenowv1.Visibility) string {
 	}
 }
 
+// logout clears the local hn_session cookie and returns to the root, which then
+// renders the sign-in page. NOTE: this ends the ArtifactA session only; the OIDC
+// provider's own SSO session persists, so the next sign-in may not re-prompt.
+// Full single-logout (redirect to the IdP end-session endpoint) is a follow-up.
+func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{
+		Name: "hn_session", Value: "", Path: "/", MaxAge: -1,
+		HttpOnly: true, SameSite: http.SameSiteLaxMode,
+	})
+	http.Redirect(w, r, "/", http.StatusFound)
+}
+
 func (s *Server) viewer(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Content-Security-Policy",
@@ -242,7 +255,12 @@ func (s *Server) raw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer rc.Close()
-	s.audit(who, slug, herenowv1.AuditAction_AUDIT_ACTION_VIEW, true)
+	// Dashboard thumbnails fetch with ?preview=1: still CanView-gated, but not
+	// logged as a VIEW so a glance at the grid doesn't flood the audit trail.
+	// A deliberate open (no preview flag) is audited as a real view.
+	if r.URL.Query().Get("preview") != "1" {
+		s.audit(who, slug, herenowv1.AuditAction_AUDIT_ACTION_VIEW, true)
+	}
 
 	ct := art.GetContentType()
 	if ct == "" {
