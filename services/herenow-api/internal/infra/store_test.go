@@ -68,6 +68,67 @@ func TestFileStoreRoundTrip(t *testing.T) {
 	}
 }
 
+// TestVersionRoundTrip verifies the versioning store path: two appended
+// versions come back ascending by n, GetVersion resolves a specific version,
+// and everything reloads from disk into a fresh FileStore (ADR-0013).
+func TestVersionRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+
+	s, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+
+	// Append out of order to prove Versions sorts ascending by n.
+	if err := s.AddVersion(&herenowv1.ArtifactVersion{
+		Slug: "doc", N: 2, ContentType: "text/html", CreatedBy: "user-1", Note: "second",
+	}); err != nil {
+		t.Fatalf("AddVersion 2: %v", err)
+	}
+	if err := s.AddVersion(&herenowv1.ArtifactVersion{
+		Slug: "doc", N: 1, ContentType: "text/plain", CreatedBy: "user-1", Note: "first",
+	}); err != nil {
+		t.Fatalf("AddVersion 1: %v", err)
+	}
+	// A version for an unrelated slug must not leak into doc's list.
+	if err := s.AddVersion(&herenowv1.ArtifactVersion{Slug: "other", N: 1, CreatedBy: "user-2"}); err != nil {
+		t.Fatalf("AddVersion other: %v", err)
+	}
+
+	// Fresh store over the same dir must reload the versions from disk.
+	reloaded, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("reload NewFileStore: %v", err)
+	}
+
+	got, err := reloaded.Versions("doc")
+	if err != nil {
+		t.Fatalf("Versions: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 versions for doc, got %d", len(got))
+	}
+	if got[0].GetN() != 1 || got[1].GetN() != 2 {
+		t.Fatalf("versions not ascending by n: got n=%d then n=%d", got[0].GetN(), got[1].GetN())
+	}
+	if got[0].GetNote() != "first" || got[1].GetNote() != "second" {
+		t.Fatalf("version notes mismatch: %q, %q", got[0].GetNote(), got[1].GetNote())
+	}
+
+	v1, ok, err := reloaded.GetVersion("doc", 1)
+	if err != nil || !ok {
+		t.Fatalf("GetVersion(doc,1): ok=%v err=%v", ok, err)
+	}
+	if v1.GetContentType() != "text/plain" || v1.GetCreatedBy() != "user-1" {
+		t.Fatalf("GetVersion(doc,1) mismatch: %+v", v1)
+	}
+
+	// A version that does not exist is a clean miss, not an error.
+	if _, ok, err := reloaded.GetVersion("doc", 3); err != nil || ok {
+		t.Fatalf("GetVersion(doc,3): expected miss, ok=%v err=%v", ok, err)
+	}
+}
+
 // TestListByGrantee verifies the grants→artifacts join: a grantee sees a
 // granted artifact, a non-grantee sees nothing, and multiple grants for the
 // same slug dedupe to a single artifact.

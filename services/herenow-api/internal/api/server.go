@@ -9,8 +9,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"strconv"
+	"time"
 
 	herenowv1 "github.com/agarwalvivek29/here.now/packages/schema/generated/go/herenow/v1"
 	"github.com/agarwalvivek29/here.now/services/herenow-api/internal/domain"
@@ -27,6 +31,10 @@ type Store interface {
 	Grants(slug string) ([]*herenowv1.Grant, error)
 	AddGrant(g *herenowv1.Grant) error
 	Append(ev *herenowv1.AuditEvent) error
+	// Versioning (ADR-0013): immutable versions per artifact.
+	AddVersion(v *herenowv1.ArtifactVersion) error
+	Versions(slug string) ([]*herenowv1.ArtifactVersion, error)
+	GetVersion(slug string, n int32) (*herenowv1.ArtifactVersion, bool, error)
 	// Dashboard listings (FR18): Mine, Shared with me, and Org.
 	ListByOwner(sub string) ([]*herenowv1.Artifact, error)
 	ListByGrantee(sub string) ([]*herenowv1.Artifact, error)
@@ -34,8 +42,8 @@ type Store interface {
 }
 
 type Blob interface {
-	Get(slug string) (io.ReadCloser, error)
-	Put(slug string, r io.Reader) error
+	Get(slug string, n int32) (io.ReadCloser, error)
+	Put(slug string, n int32, r io.Reader) error
 }
 
 type Auth interface {
@@ -81,14 +89,21 @@ func (s *Server) Routes() http.Handler {
 	// so probes never trip the limiter. Auth, CanView, audit, and response
 	// headers all remain enforced inside the wrapped handlers.
 	const contentPerMinute = 120
-	mux.Handle("GET /a/{slug}", rateLimit(http.HandlerFunc(s.viewer), contentPerMinute))  // viewer shell (no content)
-	mux.Handle("GET /a/{slug}/raw", rateLimit(http.HandlerFunc(s.raw), contentPerMinute)) // authz-gated bundle bytes
+	mux.Handle("GET /a/{slug}", rateLimit(http.HandlerFunc(s.viewer), contentPerMinute)) // viewer shell (no content)
+	// Bundle bytes, authz-gated. /raw serves the latest version; /v/{n}/raw serves
+	// a specific version. Both pass the identical CanView gate (ADR-0013).
+	mux.Handle("GET /a/{slug}/raw", rateLimit(http.HandlerFunc(s.rawLatest), contentPerMinute))
+	mux.Handle("GET /a/{slug}/v/{n}/raw", rateLimit(http.HandlerFunc(s.rawVersion), contentPerMinute))
 
 	// Publish (FR1): authenticated upload. The body is capped at 25 MiB by the
 	// maxBytes transport guard (finally wiring the previously-defined ceiling)
 	// and rate-limited per client IP like the other content routes.
 	const maxPublishBytes = 25 << 20 // 25 MiB
 	mux.Handle("POST /artifacts", rateLimit(maxBytes(http.HandlerFunc(s.publish), maxPublishBytes), contentPerMinute))
+	// Versioned update (ADR-0013): owner-only append of a new immutable version.
+	mux.Handle("POST /artifacts/{slug}/versions", rateLimit(maxBytes(http.HandlerFunc(s.addVersion), maxPublishBytes), contentPerMinute))
+	// Metadata (ADR-0013): authorized read of container + version list.
+	mux.Handle("GET /artifacts/{slug}", rateLimit(http.HandlerFunc(s.metadata), contentPerMinute))
 
 	// Sharing (FR12, FR13): owner-only mutations. Both fail closed — an
 	// unauthenticated caller gets 401 and a non-owner (or unknown slug) gets a
@@ -219,9 +234,45 @@ func (s *Server) viewer(w http.ResponseWriter, _ *http.Request) {
 	_, _ = w.Write([]byte(web.ViewerHTML))
 }
 
-// raw returns the artifact bytes only after an authorization allow.
-func (s *Server) raw(w http.ResponseWriter, r *http.Request) {
+// rawLatest serves the latest version of an artifact's bundle.
+func (s *Server) rawLatest(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
+	who, _ := s.Auth.Identify(r)
+
+	// Resolve the artifact first so we know which version is latest. The full
+	// authorization gate runs inside serveVersion; here we only need the number.
+	art, ok, err := s.Store.GetArtifact(slug)
+	if err != nil {
+		s.audit(who, slug, herenowv1.AuditAction_AUDIT_ACTION_DENY, false)
+		http.Error(w, "unavailable", http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		s.audit(who, slug, herenowv1.AuditAction_AUDIT_ACTION_VIEW, false)
+		http.NotFound(w, r) // don't leak existence
+		return
+	}
+	s.serveVersion(w, r, slug, art.GetLatestVersion())
+}
+
+// rawVersion serves a specific version {n} of an artifact's bundle. A malformed
+// version number is a 404 (never leaks whether the artifact exists).
+func (s *Server) rawVersion(w http.ResponseWriter, r *http.Request) {
+	slug := r.PathValue("slug")
+	n, err := parseVersion(r.PathValue("n"))
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	s.serveVersion(w, r, slug, n)
+}
+
+// serveVersion is the shared authz-gated serving path for both /raw and
+// /v/{n}/raw. It runs the identical gate — GetArtifact → Grants → CanView, fail
+// closed with a not-leaking 404 — then, only after an allow, fetches version n's
+// blob, sets the strict CSP + nosniff headers, streams the bytes, and audits a
+// VIEW unless the caller passed ?preview=1.
+func (s *Server) serveVersion(w http.ResponseWriter, r *http.Request, slug string, n int32) {
 	who, _ := s.Auth.Identify(r)
 
 	art, ok, err := s.Store.GetArtifact(slug)
@@ -247,9 +298,14 @@ func (s *Server) raw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Invariant: the blob is fetched ONLY after CanView allows above.
-	rc, err := s.Blob.Get(slug)
+	// Invariant: the blob is fetched ONLY after CanView allows above. A request
+	// for a version that does not exist is a not-leaking 404.
+	rc, err := s.Blob.Get(slug, n)
 	if err != nil {
+		if os.IsNotExist(err) {
+			http.NotFound(w, r)
+			return
+		}
 		s.audit(who, slug, herenowv1.AuditAction_AUDIT_ACTION_DENY, false)
 		http.Error(w, "unavailable", http.StatusInternalServerError)
 		return
@@ -262,7 +318,11 @@ func (s *Server) raw(w http.ResponseWriter, r *http.Request) {
 		s.audit(who, slug, herenowv1.AuditAction_AUDIT_ACTION_VIEW, true)
 	}
 
+	// Prefer the served version's own content type; fall back to the artifact's.
 	ct := art.GetContentType()
+	if v, ok, err := s.Store.GetVersion(slug, n); err == nil && ok && v.GetContentType() != "" {
+		ct = v.GetContentType()
+	}
 	if ct == "" {
 		ct = "text/html; charset=utf-8"
 	}
@@ -275,6 +335,16 @@ func (s *Server) raw(w http.ResponseWriter, r *http.Request) {
 			"style-src 'unsafe-inline' https:; script-src 'unsafe-inline' https:; connect-src https:")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	_, _ = io.Copy(w, rc)
+}
+
+// parseVersion parses the {n} path segment into a positive 1-based version
+// number. Anything non-numeric or < 1 is rejected.
+func parseVersion(raw string) (int32, error) {
+	v, err := strconv.Atoi(raw)
+	if err != nil || v < 1 {
+		return 0, fmt.Errorf("invalid version %q", raw)
+	}
+	return int32(v), nil
 }
 
 // publish accepts an authenticated upload and creates a private artifact. The
@@ -326,19 +396,34 @@ func (s *Server) publish(w http.ResponseWriter, r *http.Request) {
 	bundled, bundledCT, _, _ := render.Bundle(body, ct)
 	ct = bundledCT
 
-	if err := s.Blob.Put(slug, bytes.NewReader(bundled)); err != nil {
+	// A new artifact starts at version 1 (ADR-0013).
+	const firstVersion = 1
+	if err := s.Blob.Put(slug, firstVersion, bytes.NewReader(bundled)); err != nil {
 		s.audit(who, slug, herenowv1.AuditAction_AUDIT_ACTION_DENY, false)
 		http.Error(w, "unavailable", http.StatusInternalServerError)
 		return
 	}
 
+	now := timestamppb.Now()
 	art := &herenowv1.Artifact{
+		Slug:          slug,
+		OwnerSub:      owner,
+		Title:         title,
+		Visibility:    herenowv1.Visibility_VISIBILITY_PRIVATE, // private by default
+		ContentType:   ct,
+		CreatedAt:     now,
+		LatestVersion: firstVersion,
+	}
+	if err := s.Store.AddVersion(&herenowv1.ArtifactVersion{
 		Slug:        slug,
-		OwnerSub:    owner,
-		Title:       title,
-		Visibility:  herenowv1.Visibility_VISIBILITY_PRIVATE, // private by default
+		N:           firstVersion,
 		ContentType: ct,
-		CreatedAt:   timestamppb.Now(),
+		CreatedAt:   now,
+		CreatedBy:   owner,
+	}); err != nil {
+		s.audit(who, slug, herenowv1.AuditAction_AUDIT_ACTION_DENY, false)
+		http.Error(w, "unavailable", http.StatusInternalServerError)
+		return
 	}
 	if err := s.Store.PutArtifact(art); err != nil {
 		s.audit(who, slug, herenowv1.AuditAction_AUDIT_ACTION_DENY, false)
@@ -378,6 +463,142 @@ func (s *Server) ownedArtifact(w http.ResponseWriter, r *http.Request, slug stri
 		return nil, nil, false
 	}
 	return art, who, true
+}
+
+// addVersion (ADR-0013) appends a new immutable version to an existing artifact.
+// Owner-only via the same fail-closed gate as the sharing endpoints (401 for an
+// unauthenticated caller, 404 for a non-owner or missing artifact). The new
+// version number is latest+1; nothing is overwritten. The body is bundled like
+// publish, stored at (slug, n), recorded as a version, and the artifact's
+// latest_version + content_type are advanced. A PUBLISH audit event is written.
+// Responds 201 with {slug, version, url}.
+func (s *Server) addVersion(w http.ResponseWriter, r *http.Request) {
+	slug := r.PathValue("slug")
+	art, who, ok := s.ownedArtifact(w, r, slug)
+	if !ok {
+		return
+	}
+
+	ct := r.Header.Get("Content-Type")
+	if ct == "" {
+		ct = "text/html; charset=utf-8"
+	}
+	note := r.URL.Query().Get("note")
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		var mbe *http.MaxBytesError
+		if errors.As(err, &mbe) {
+			s.audit(who, slug, herenowv1.AuditAction_AUDIT_ACTION_DENY, false)
+			http.Error(w, "payload too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		s.audit(who, slug, herenowv1.AuditAction_AUDIT_ACTION_DENY, false)
+		http.Error(w, "unavailable", http.StatusInternalServerError)
+		return
+	}
+
+	// Render-parity bundling, identical to publish (fail-soft).
+	bundled, bundledCT, _, _ := render.Bundle(body, ct)
+	ct = bundledCT
+
+	n := art.GetLatestVersion() + 1
+	if err := s.Blob.Put(slug, n, bytes.NewReader(bundled)); err != nil {
+		s.audit(who, slug, herenowv1.AuditAction_AUDIT_ACTION_DENY, false)
+		http.Error(w, "unavailable", http.StatusInternalServerError)
+		return
+	}
+
+	now := timestamppb.Now()
+	if err := s.Store.AddVersion(&herenowv1.ArtifactVersion{
+		Slug:        slug,
+		N:           n,
+		ContentType: ct,
+		CreatedAt:   now,
+		CreatedBy:   who.GetSub(),
+		Note:        note,
+	}); err != nil {
+		s.audit(who, slug, herenowv1.AuditAction_AUDIT_ACTION_DENY, false)
+		http.Error(w, "unavailable", http.StatusInternalServerError)
+		return
+	}
+
+	art.LatestVersion = n
+	art.ContentType = ct
+	if err := s.Store.PutArtifact(art); err != nil {
+		s.audit(who, slug, herenowv1.AuditAction_AUDIT_ACTION_DENY, false)
+		http.Error(w, "unavailable", http.StatusInternalServerError)
+		return
+	}
+	s.audit(who, slug, herenowv1.AuditAction_AUDIT_ACTION_PUBLISH, true)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"slug":    slug,
+		"version": n,
+		"url":     s.BaseURL + "/a/" + slug,
+	})
+}
+
+// metadata (ADR-0013) returns the artifact container plus its version list to any
+// caller authorized to view it. It runs the identical CanView gate as serving:
+// an unauthorized or unknown artifact is a not-leaking 404. is_owner is true when
+// the caller is the artifact's owner. Powers the viewer version switcher and the
+// owner Share panel.
+func (s *Server) metadata(w http.ResponseWriter, r *http.Request) {
+	slug := r.PathValue("slug")
+	who, _ := s.Auth.Identify(r)
+
+	art, ok, err := s.Store.GetArtifact(slug)
+	if err != nil {
+		http.Error(w, "unavailable", http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		http.NotFound(w, r) // don't leak existence
+		return
+	}
+	grants, err := s.Store.Grants(slug)
+	if err != nil {
+		http.Error(w, "unavailable", http.StatusInternalServerError)
+		return
+	}
+	if !domain.CanView(art, who, grants) {
+		http.NotFound(w, r) // forbidden and missing look identical
+		return
+	}
+
+	versions, err := s.Store.Versions(slug)
+	if err != nil {
+		http.Error(w, "unavailable", http.StatusInternalServerError)
+		return
+	}
+
+	type versionView struct {
+		N         int32  `json:"n"`
+		CreatedAt string `json:"created_at,omitempty"`
+		CreatedBy string `json:"created_by,omitempty"`
+		Note      string `json:"note,omitempty"`
+	}
+	vs := make([]versionView, 0, len(versions))
+	for _, v := range versions {
+		vv := versionView{N: v.GetN(), CreatedBy: v.GetCreatedBy(), Note: v.GetNote()}
+		if v.GetCreatedAt() != nil {
+			vv.CreatedAt = v.GetCreatedAt().AsTime().UTC().Format(time.RFC3339)
+		}
+		vs = append(vs, vv)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"slug":           art.GetSlug(),
+		"title":          art.GetTitle(),
+		"visibility":     visibilityLabel(art.GetVisibility()),
+		"latest_version": art.GetLatestVersion(),
+		"is_owner":       who != nil && who.GetSub() == art.GetOwnerSub(),
+		"versions":       vs,
+	})
 }
 
 // addGrant (FR12) grants a subject access to an artifact. Owner-only. The

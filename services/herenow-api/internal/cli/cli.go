@@ -284,15 +284,27 @@ func publish(args []string) error {
 	if err != nil {
 		return err
 	}
+	now := timestamppb.Now()
+	const firstVersion = 1
 	art := &herenowv1.Artifact{
-		Slug:        domain.NewSlug(),
-		OwnerSub:    c.Sub,
-		Title:       filepath.Base(args[0]),
-		Visibility:  herenowv1.Visibility_VISIBILITY_PRIVATE, // private by default
-		ContentType: "text/html; charset=utf-8",
-		CreatedAt:   timestamppb.Now(),
+		Slug:          domain.NewSlug(),
+		OwnerSub:      c.Sub,
+		Title:         filepath.Base(args[0]),
+		Visibility:    herenowv1.Visibility_VISIBILITY_PRIVATE, // private by default
+		ContentType:   "text/html; charset=utf-8",
+		CreatedAt:     now,
+		LatestVersion: firstVersion,
 	}
-	if err := bl.Put(art.GetSlug(), f); err != nil {
+	if err := bl.Put(art.GetSlug(), firstVersion, f); err != nil {
+		return err
+	}
+	if err := st.AddVersion(&herenowv1.ArtifactVersion{
+		Slug:        art.GetSlug(),
+		N:           firstVersion,
+		ContentType: art.GetContentType(),
+		CreatedAt:   now,
+		CreatedBy:   c.Sub,
+	}); err != nil {
 		return err
 	}
 	if err := st.PutArtifact(art); err != nil {
