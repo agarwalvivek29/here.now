@@ -392,15 +392,19 @@ func (x *Grant) GetCreatedAt() *timestamppb.Timestamp {
 // events, so they are never written to the hash-chained audit trail. The body is
 // user content and MUST be rendered as text (never innerHTML) in the viewer.
 type Comment struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Slug          string                 `protobuf:"bytes,2,opt,name=slug,proto3" json:"slug,omitempty"`
-	Version       int32                  `protobuf:"varint,3,opt,name=version,proto3" json:"version,omitempty"`
-	AuthorSub     string                 `protobuf:"bytes,4,opt,name=author_sub,json=authorSub,proto3" json:"author_sub,omitempty"`
-	AuthorEmail   string                 `protobuf:"bytes,5,opt,name=author_email,json=authorEmail,proto3" json:"author_email,omitempty"`
-	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	Body          string                 `protobuf:"bytes,7,opt,name=body,proto3" json:"body,omitempty"`
-	Resolved      bool                   `protobuf:"varint,8,opt,name=resolved,proto3" json:"resolved,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Id          string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Slug        string                 `protobuf:"bytes,2,opt,name=slug,proto3" json:"slug,omitempty"`
+	Version     int32                  `protobuf:"varint,3,opt,name=version,proto3" json:"version,omitempty"`
+	AuthorSub   string                 `protobuf:"bytes,4,opt,name=author_sub,json=authorSub,proto3" json:"author_sub,omitempty"`
+	AuthorEmail string                 `protobuf:"bytes,5,opt,name=author_email,json=authorEmail,proto3" json:"author_email,omitempty"`
+	CreatedAt   *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	Body        string                 `protobuf:"bytes,7,opt,name=body,proto3" json:"body,omitempty"`
+	Resolved    bool                   `protobuf:"varint,8,opt,name=resolved,proto3" json:"resolved,omitempty"`
+	// Optional text anchor (ADR-0015). When set, the comment is anchored to a span
+	// of the artifact's text; when unset, it is a page-level note. Because version
+	// content is immutable, an anchor made on a version stays valid on it forever.
+	Anchor        *TextAnchor `protobuf:"bytes,9,opt,name=anchor,proto3" json:"anchor,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -491,6 +495,94 @@ func (x *Comment) GetResolved() bool {
 	return false
 }
 
+func (x *Comment) GetAnchor() *TextAnchor {
+	if x != nil {
+		return x.Anchor
+	}
+	return nil
+}
+
+// TextAnchor locates a comment against a span of an artifact's rendered text
+// (ADR-0015), W3C-annotation style: a content quote (never a DOM path), a little
+// surrounding context to disambiguate repeats, and a character-offset fast path.
+// It is display metadata resolved client-side in the sandboxed viewer; the server
+// stores it verbatim and never trusts it for authorization.
+type TextAnchor struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Quote         string                 `protobuf:"bytes,1,opt,name=quote,proto3" json:"quote,omitempty"`   // the exact selected text
+	Prefix        string                 `protobuf:"bytes,2,opt,name=prefix,proto3" json:"prefix,omitempty"` // a few characters immediately before the quote
+	Suffix        string                 `protobuf:"bytes,3,opt,name=suffix,proto3" json:"suffix,omitempty"` // a few characters immediately after the quote
+	Start         int32                  `protobuf:"varint,4,opt,name=start,proto3" json:"start,omitempty"`  // char offset of the quote into the document's text content
+	End           int32                  `protobuf:"varint,5,opt,name=end,proto3" json:"end,omitempty"`      // char offset just past the quote
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TextAnchor) Reset() {
+	*x = TextAnchor{}
+	mi := &file_herenow_v1_artifact_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TextAnchor) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TextAnchor) ProtoMessage() {}
+
+func (x *TextAnchor) ProtoReflect() protoreflect.Message {
+	mi := &file_herenow_v1_artifact_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TextAnchor.ProtoReflect.Descriptor instead.
+func (*TextAnchor) Descriptor() ([]byte, []int) {
+	return file_herenow_v1_artifact_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *TextAnchor) GetQuote() string {
+	if x != nil {
+		return x.Quote
+	}
+	return ""
+}
+
+func (x *TextAnchor) GetPrefix() string {
+	if x != nil {
+		return x.Prefix
+	}
+	return ""
+}
+
+func (x *TextAnchor) GetSuffix() string {
+	if x != nil {
+		return x.Suffix
+	}
+	return ""
+}
+
+func (x *TextAnchor) GetStart() int32 {
+	if x != nil {
+		return x.Start
+	}
+	return 0
+}
+
+func (x *TextAnchor) GetEnd() int32 {
+	if x != nil {
+		return x.End
+	}
+	return 0
+}
+
 var File_herenow_v1_artifact_proto protoreflect.FileDescriptor
 
 const file_herenow_v1_artifact_proto_rawDesc = "" +
@@ -527,7 +619,7 @@ const file_herenow_v1_artifact_proto_rawDesc = "" +
 	"\n" +
 	"granted_by\x18\x03 \x01(\tR\tgrantedBy\x129\n" +
 	"\n" +
-	"created_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\"\xf4\x01\n" +
+	"created_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\"\xa4\x02\n" +
 	"\aComment\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04slug\x18\x02 \x01(\tR\x04slug\x12\x18\n" +
@@ -538,7 +630,15 @@ const file_herenow_v1_artifact_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12\x12\n" +
 	"\x04body\x18\a \x01(\tR\x04body\x12\x1a\n" +
-	"\bresolved\x18\b \x01(\bR\bresolved*l\n" +
+	"\bresolved\x18\b \x01(\bR\bresolved\x12.\n" +
+	"\x06anchor\x18\t \x01(\v2\x16.herenow.v1.TextAnchorR\x06anchor\"z\n" +
+	"\n" +
+	"TextAnchor\x12\x14\n" +
+	"\x05quote\x18\x01 \x01(\tR\x05quote\x12\x16\n" +
+	"\x06prefix\x18\x02 \x01(\tR\x06prefix\x12\x16\n" +
+	"\x06suffix\x18\x03 \x01(\tR\x06suffix\x12\x14\n" +
+	"\x05start\x18\x04 \x01(\x05R\x05start\x12\x10\n" +
+	"\x03end\x18\x05 \x01(\x05R\x03end*l\n" +
 	"\n" +
 	"Visibility\x12\x1a\n" +
 	"\x16VISIBILITY_UNSPECIFIED\x10\x00\x12\x16\n" +
@@ -562,7 +662,7 @@ func file_herenow_v1_artifact_proto_rawDescGZIP() []byte {
 }
 
 var file_herenow_v1_artifact_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_herenow_v1_artifact_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_herenow_v1_artifact_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_herenow_v1_artifact_proto_goTypes = []any{
 	(Visibility)(0),               // 0: herenow.v1.Visibility
 	(*Identity)(nil),              // 1: herenow.v1.Identity
@@ -570,19 +670,21 @@ var file_herenow_v1_artifact_proto_goTypes = []any{
 	(*ArtifactVersion)(nil),       // 3: herenow.v1.ArtifactVersion
 	(*Grant)(nil),                 // 4: herenow.v1.Grant
 	(*Comment)(nil),               // 5: herenow.v1.Comment
-	(*timestamppb.Timestamp)(nil), // 6: google.protobuf.Timestamp
+	(*TextAnchor)(nil),            // 6: herenow.v1.TextAnchor
+	(*timestamppb.Timestamp)(nil), // 7: google.protobuf.Timestamp
 }
 var file_herenow_v1_artifact_proto_depIdxs = []int32{
 	0, // 0: herenow.v1.Artifact.visibility:type_name -> herenow.v1.Visibility
-	6, // 1: herenow.v1.Artifact.created_at:type_name -> google.protobuf.Timestamp
-	6, // 2: herenow.v1.ArtifactVersion.created_at:type_name -> google.protobuf.Timestamp
-	6, // 3: herenow.v1.Grant.created_at:type_name -> google.protobuf.Timestamp
-	6, // 4: herenow.v1.Comment.created_at:type_name -> google.protobuf.Timestamp
-	5, // [5:5] is the sub-list for method output_type
-	5, // [5:5] is the sub-list for method input_type
-	5, // [5:5] is the sub-list for extension type_name
-	5, // [5:5] is the sub-list for extension extendee
-	0, // [0:5] is the sub-list for field type_name
+	7, // 1: herenow.v1.Artifact.created_at:type_name -> google.protobuf.Timestamp
+	7, // 2: herenow.v1.ArtifactVersion.created_at:type_name -> google.protobuf.Timestamp
+	7, // 3: herenow.v1.Grant.created_at:type_name -> google.protobuf.Timestamp
+	7, // 4: herenow.v1.Comment.created_at:type_name -> google.protobuf.Timestamp
+	6, // 5: herenow.v1.Comment.anchor:type_name -> herenow.v1.TextAnchor
+	6, // [6:6] is the sub-list for method output_type
+	6, // [6:6] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_herenow_v1_artifact_proto_init() }
@@ -596,7 +698,7 @@ func file_herenow_v1_artifact_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_herenow_v1_artifact_proto_rawDesc), len(file_herenow_v1_artifact_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   5,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

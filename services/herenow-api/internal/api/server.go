@@ -704,6 +704,22 @@ func parseVisibility(s string) (herenowv1.Visibility, bool) {
 // exhaust storage or the viewer. Measured in runes, not bytes.
 const maxCommentRunes = 4000
 
+// Anchor caps (ADR-0015): bound the stored quote and its surrounding context so
+// a client can't bloat storage through the anchor. Over-cap quotes degrade to a
+// page-level note rather than a rejection.
+const (
+	maxQuoteRunes         = 2000
+	maxAnchorContextRunes = 64
+)
+
+// clampRunes truncates s to at most n runes (rune-safe, not byte-safe).
+func clampRunes(s string, n int) string {
+	if utf8.RuneCountInString(s) <= n {
+		return s
+	}
+	return string([]rune(s)[:n])
+}
+
 // viewableArtifact runs the shared CanView gate for the comment read/create
 // endpoints: GetArtifact → Grants → CanView, fail closed with a not-leaking 404.
 // Unlike ownedArtifact it admits any authorized viewer (owner or grantee), which
@@ -735,13 +751,22 @@ func (s *Server) viewableArtifact(w http.ResponseWriter, r *http.Request, slug s
 
 // commentView is the wire shape returned to clients. It deliberately omits
 // author_sub (the internal subject id) and slug (implied by the path).
+type anchorView struct {
+	Quote  string `json:"quote"`
+	Prefix string `json:"prefix,omitempty"`
+	Suffix string `json:"suffix,omitempty"`
+	Start  int32  `json:"start"`
+	End    int32  `json:"end"`
+}
+
 type commentView struct {
-	ID          string `json:"id"`
-	Version     int32  `json:"version"`
-	AuthorEmail string `json:"author_email"`
-	CreatedAt   string `json:"created_at,omitempty"`
-	Body        string `json:"body"`
-	Resolved    bool   `json:"resolved"`
+	ID          string      `json:"id"`
+	Version     int32       `json:"version"`
+	AuthorEmail string      `json:"author_email"`
+	CreatedAt   string      `json:"created_at,omitempty"`
+	Body        string      `json:"body"`
+	Resolved    bool        `json:"resolved"`
+	Anchor      *anchorView `json:"anchor,omitempty"`
 }
 
 func toCommentView(c *herenowv1.Comment) commentView {
@@ -754,6 +779,15 @@ func toCommentView(c *herenowv1.Comment) commentView {
 	}
 	if c.GetCreatedAt() != nil {
 		cv.CreatedAt = c.GetCreatedAt().AsTime().UTC().Format(time.RFC3339)
+	}
+	if a := c.GetAnchor(); a != nil && a.GetQuote() != "" {
+		cv.Anchor = &anchorView{
+			Quote:  a.GetQuote(),
+			Prefix: a.GetPrefix(),
+			Suffix: a.GetSuffix(),
+			Start:  a.GetStart(),
+			End:    a.GetEnd(),
+		}
 	}
 	return cv
 }
@@ -775,6 +809,13 @@ func (s *Server) addComment(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Body    string `json:"body"`
 		Version int32  `json:"version"`
+		Anchor  *struct {
+			Quote  string `json:"quote"`
+			Prefix string `json:"prefix"`
+			Suffix string `json:"suffix"`
+			Start  int32  `json:"start"`
+			End    int32  `json:"end"`
+		} `json:"anchor"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
@@ -803,6 +844,22 @@ func (s *Server) addComment(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:   timestamppb.Now(),
 		Body:        text,
 		Resolved:    false,
+	}
+	// Optional text anchor (ADR-0015): stored verbatim as display metadata, never
+	// trusted for authz. A quote that is absent or over the cap yields a
+	// page-level note rather than a rejected request; context is bounded so a
+	// hostile client can't bloat storage through prefix/suffix.
+	if a := body.Anchor; a != nil {
+		q := strings.TrimSpace(a.Quote)
+		if q != "" && utf8.RuneCountInString(q) <= maxQuoteRunes {
+			c.Anchor = &herenowv1.TextAnchor{
+				Quote:  q,
+				Prefix: clampRunes(a.Prefix, maxAnchorContextRunes),
+				Suffix: clampRunes(a.Suffix, maxAnchorContextRunes),
+				Start:  a.Start,
+				End:    a.End,
+			}
+		}
 	}
 	if err := s.Store.AddComment(c); err != nil {
 		http.Error(w, "unavailable", http.StatusInternalServerError)

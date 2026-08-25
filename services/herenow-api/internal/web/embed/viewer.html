@@ -90,6 +90,7 @@
     .cempty{color:var(--muted);font-size:12.5px;text-align:center;margin-top:24px;line-height:1.5}
     .citem{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--bg)}
     .citem.resolved{opacity:.62}
+    .citem.focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(232,38,92,.14)}
     .cmeta{display:flex;align-items:center;gap:8px;margin-bottom:6px}
     .cmeta .cauthor{font-size:12px;font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .cmeta .ctime{font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--muted);margin-left:auto;white-space:nowrap}
@@ -109,6 +110,29 @@
     .composer .chint{font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--muted)}
     .composer .cpost{margin-left:auto}
     .cpost[disabled]{opacity:.5;cursor:not-allowed}
+
+    /* anchored comments (ADR-0015): floating "add comment" over a selection */
+    .addcomment{position:fixed;z-index:30;display:none;align-items:center;gap:6px;
+      font:600 12px "IBM Plex Sans",sans-serif;color:#fff;background:var(--accent);
+      border:0;border-radius:8px;padding:6px 11px;cursor:pointer;box-shadow:0 6px 18px rgba(10,10,30,.28)}
+    .addcomment.show{display:inline-flex}
+    .addcomment svg{width:13px;height:13px}
+    .addcomment:hover{background:var(--accent-hover)}
+    .addcomment:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+    /* an anchored comment shows the quoted span and is click-to-locate */
+    .citem.anchored{cursor:pointer}
+    .citem.anchored:hover{border-color:var(--accent)}
+    .cquote{font-size:11.5px;color:var(--muted);border-left:2px solid var(--accent);
+      padding:1px 0 1px 8px;margin-bottom:6px;line-height:1.4;
+      display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+    /* composer: the span the pending comment is anchored to */
+    .canchor{display:none;align-items:flex-start;gap:6px;font-size:11.5px;color:var(--muted);
+      background:var(--bg);border:1px solid var(--line);border-left:2px solid var(--accent);
+      border-radius:7px;padding:5px 8px}
+    .canchor.show{display:flex}
+    .canchor .q{flex:1;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+    .canchor .x{background:none;border:0;color:var(--muted);cursor:pointer;font-size:15px;line-height:1;padding:0 2px}
+    .canchor .x:hover{color:var(--ink)}
   </style>
 </head>
 <body>
@@ -128,7 +152,7 @@
     <span class="chip">sandboxed</span>
   </div>
 
-  <!-- comments drawer (ADR-0014): version-pinned review feedback -->
+  <!-- comments drawer (ADR-0014/0015): version-pinned, optionally anchored feedback -->
   <aside class="drawer" id="drawer" aria-label="Comments" aria-hidden="true">
     <div class="drawer-head">
       <h2>Comments</h2>
@@ -137,6 +161,10 @@
     </div>
     <div class="clist" id="clist"></div>
     <form class="composer" id="composer">
+      <div class="canchor" id="canchor">
+        <span class="q" id="canchorq"></span>
+        <button class="x" id="canchorx" type="button" aria-label="Remove selected text">&times;</button>
+      </div>
       <textarea id="cinput" placeholder="Leave a comment on this version…" aria-label="Comment body" maxlength="4000"></textarea>
       <div class="crow">
         <span class="chint" id="cerr"></span>
@@ -175,13 +203,62 @@
 
   <iframe id="frame" sandbox="allow-scripts" referrerpolicy="no-referrer" title="artifact"></iframe>
 
+  <!-- floating affordance shown over a text selection inside the artifact (ADR-0015) -->
+  <button class="addcomment" id="addcomment" type="button">
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 5h16v11H8l-4 3V5Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+    Comment
+  </button>
+
   <script>
-    // Metadata-first load: fetch the authorized metadata, then load the content
-    // of the current version into the sandboxed iframe. A version switcher lets
-    // the viewer flip between immutable versions without leaving the page, and a
-    // comments drawer (ADR-0014) shows the feedback pinned to the version being
-    // viewed. Comment bodies are USER CONTENT — always rendered via textContent,
-    // never innerHTML.
+    // Viewer shell. Metadata-first load, a version switcher over immutable
+    // versions (ADR-0013), and a comments drawer (ADR-0014) whose comments can be
+    // ANCHORED to a text selection (ADR-0015). Because the artifact renders in a
+    // null-origin sandbox, the shell cannot read the selection inside it: a small
+    // bridge injected into the frame is the only code that can, and it talks to
+    // the shell over postMessage. Every inbound message is untrusted DISPLAY
+    // metadata — validated by source, never trusted for authorization. Comment
+    // bodies and quotes are USER CONTENT and always go in via textContent.
+
+    // BRIDGE — injected into the sandboxed artifact frame (see the note at the
+    // foot of this block for what it does). Declared before the shell IIFE so it
+    // is defined by the time loadVersion() references it.
+    const BRIDGE = '\n<script>(function(){' +
+      'function post(type,p){try{parent.postMessage(Object.assign({source:"herenow",type:type},p||{}),"*");}catch(e){}}' +
+      'var st=document.createElement("style");' +
+      'st.textContent="::highlight(hn-anchor){background-color:rgba(232,38,92,.20);}::highlight(hn-anchor-resolved){background-color:rgba(140,140,160,.20);}::highlight(hn-focus){background-color:rgba(232,38,92,.45);color:#fff;}";' +
+      '(document.head||document.documentElement).appendChild(st);' +
+      'function offsetOf(node,off){var r=document.createRange();r.selectNodeContents(document.body);try{r.setEnd(node,off);}catch(e){return 0;}return r.toString().length;}' +
+      'function rangeFromOffsets(s,e){var w=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT,null),pos=0,r=document.createRange(),ss=false,se=false,n;' +
+        'while((n=w.nextNode())){var len=n.nodeValue.length;if(!ss&&s<=pos+len){r.setStart(n,s-pos);ss=true;}if(!se&&e<=pos+len){r.setEnd(n,e-pos);se=true;break;}pos+=len;}' +
+        'return (ss&&se)?r:null;}' +
+      'function locate(a){var r=rangeFromOffsets(a.start,a.end);if(r&&r.toString()===a.quote)return r;' +
+        'var full=document.body.textContent,idx=-1;' +
+        'if(a.prefix||a.suffix){var p=full.indexOf(a.prefix+a.quote+a.suffix);if(p>=0)idx=p+a.prefix.length;}' +
+        'if(idx<0)idx=full.indexOf(a.quote);if(idx<0)return null;return rangeFromOffsets(idx,idx+a.quote.length);}' +
+      'var ranges=[];var HL=(window.CSS&&CSS.highlights&&window.Highlight);' +
+      'function paint(anchors){ranges=[];if(!HL){return;}var base=new Highlight(),res=new Highlight();' +
+        'for(var i=0;i<anchors.length;i++){var a=anchors[i];var r=locate(a);if(!r)continue;ranges.push({id:a.id,range:r});(a.resolved?res:base).add(r);}' +
+        'CSS.highlights.set("hn-anchor",base);CSS.highlights.set("hn-anchor-resolved",res);}' +
+      'function caretAt(x,y){if(document.caretRangeFromPoint)return document.caretRangeFromPoint(x,y);' +
+        'if(document.caretPositionFromPoint){var p=document.caretPositionFromPoint(x,y);if(!p)return null;var r=document.createRange();r.setStart(p.offsetNode,p.offset);return r;}return null;}' +
+      'function report(){var sel=document.getSelection();if(!sel||sel.isCollapsed||!sel.rangeCount){post("hn-selection-cleared");return;}' +
+        'var range=sel.getRangeAt(0),quote=sel.toString();if(!quote.trim()){post("hn-selection-cleared");return;}' +
+        'var start=offsetOf(range.startContainer,range.startOffset),end=start+quote.length,full=document.body.textContent;' +
+        'var rc=range.getBoundingClientRect();' +
+        'post("hn-selection",{quote:quote,prefix:full.slice(Math.max(0,start-32),start),suffix:full.slice(end,end+32),start:start,end:end,' +
+          'rect:{left:rc.left,top:rc.top,right:rc.right,bottom:rc.bottom,width:rc.width,height:rc.height}});}' +
+      'document.addEventListener("mouseup",function(){setTimeout(report,10);});' +
+      'var t;document.addEventListener("selectionchange",function(){clearTimeout(t);t=setTimeout(report,250);});' +
+      'document.addEventListener("click",function(e){var cr=caretAt(e.clientX,e.clientY);if(!cr)return;' +
+        'for(var i=0;i<ranges.length;i++){try{if(ranges[i].range.isPointInRange(cr.startContainer,cr.startOffset)){post("hn-focus",{id:ranges[i].id});return;}}catch(err){}}});' +
+      'window.addEventListener("message",function(e){var d=e.data;if(!d||d.source!=="herenow")return;' +
+        'if(d.type==="hn-anchors"){paint(d.anchors||[]);}' +
+        'else if(d.type==="hn-scroll"){var m=null;for(var i=0;i<ranges.length;i++){if(ranges[i].id===d.id){m=ranges[i];break;}}' +
+          'if(m){var rr=m.range.getBoundingClientRect();window.scrollTo({top:window.scrollY+rr.top-90,behavior:"smooth"});' +
+            'if(HL){var f=new Highlight();f.add(m.range);CSS.highlights.set("hn-focus",f);setTimeout(function(){CSS.highlights.delete("hn-focus");},1300);}}}});' +
+      'post("hn-ready");' +
+      '})();<\/' + 'script>';
+
     (async () => {
       const parts = location.pathname.split('/').filter(Boolean); // ["a","<slug>"]
       const slug = parts[1] || '';
@@ -205,8 +282,18 @@
       const cinput = document.getElementById('cinput');
       const cpost = document.getElementById('cpost');
       const cerr = document.getElementById('cerr');
+      const addcomment = document.getElementById('addcomment');
+      const canchor = document.getElementById('canchor');
+      const canchorq = document.getElementById('canchorq');
+      const canchorx = document.getElementById('canchorx');
+
       let currentVersion = 1;
       let isOwner = false;
+      let currentComments = [];   // last-loaded comments for currentVersion
+      let pendingSelection = null; // latest selection reported by the frame
+      let pendingAnchor = null;    // anchor locked onto the composer draft
+      let bridgeReady = false;     // frame bridge has announced itself
+      let lastAnchors = [];        // anchors to (re)send when the bridge is ready
 
       const shortTime = iso => {
         if (!iso) return '';
@@ -215,20 +302,60 @@
         return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
       };
 
-      // renderComments paints the list for the current version. Bodies go in via
-      // textContent so user content can never inject markup.
+      const toFrame = (type, payload) => {
+        try { frame.contentWindow && frame.contentWindow.postMessage(Object.assign({ source: 'herenow', type }, payload), '*'); }
+        catch (e) { /* frame not ready */ }
+      };
+
+      // Push the current version's anchors into the frame so it can paint the
+      // highlights. Sent whenever comments change and re-sent when a freshly
+      // loaded bridge announces itself.
+      const pushAnchors = () => {
+        lastAnchors = currentComments
+          .filter(c => c.anchor && c.anchor.quote)
+          .map(c => ({ id: c.id, quote: c.anchor.quote, prefix: c.anchor.prefix || '',
+            suffix: c.anchor.suffix || '', start: c.anchor.start | 0, end: c.anchor.end | 0, resolved: !!c.resolved }));
+        if (bridgeReady) toFrame('hn-anchors', { anchors: lastAnchors });
+      };
+
+      // Bring a comment into view in the drawer and pulse it (used when a
+      // highlight is clicked in the artifact).
+      const focusComment = (id) => {
+        openDrawer(true);
+        const el = clist.querySelector('[data-id="' + (window.CSS && CSS.escape ? CSS.escape(id) : id) + '"]');
+        if (!el) return;
+        el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        el.classList.add('focus');
+        setTimeout(() => el.classList.remove('focus'), 1400);
+      };
+
+      // renderComments paints the list for the current version. Bodies and quotes
+      // go in via textContent so user content can never inject markup.
       const renderComments = comments => {
         clist.textContent = '';
         if (!comments.length) {
           const empty = document.createElement('div');
           empty.className = 'cempty';
-          empty.textContent = 'No comments on v' + currentVersion + ' yet. Start the conversation below.';
+          empty.textContent = 'No comments on v' + currentVersion + ' yet. Select text in the artifact to comment on it, or leave a note below.';
           clist.appendChild(empty);
           return;
         }
         for (const c of comments) {
           const item = document.createElement('div');
-          item.className = 'citem' + (c.resolved ? ' resolved' : '');
+          item.className = 'citem' + (c.resolved ? ' resolved' : '') + (c.anchor && c.anchor.quote ? ' anchored' : '');
+          item.dataset.id = c.id;
+
+          if (c.anchor && c.anchor.quote) {
+            const quote = document.createElement('div');
+            quote.className = 'cquote';
+            quote.textContent = c.anchor.quote;   // USER CONTENT — text only
+            item.appendChild(quote);
+            item.title = 'Jump to this text';
+            item.addEventListener('click', (e) => {
+              if (e.target.closest('.cresolve')) return; // don't hijack the Resolve button
+              toFrame('hn-scroll', { id: c.id });
+            });
+          }
 
           const meta = document.createElement('div');
           meta.className = 'cmeta';
@@ -273,28 +400,48 @@
         }
       };
 
-      // refreshComments loads the current version's comments and updates the
-      // list (when the drawer is open) and the top-bar count.
+      // refreshComments loads the current version's comments, updates the top-bar
+      // count, re-paints the in-artifact highlights, and (if the drawer is open)
+      // re-renders the list.
       const refreshComments = async (n) => {
         try {
           const res = await fetch('/artifacts/' + encodeURIComponent(slug) + '/comments?version=' + n,
             { credentials: 'same-origin' });
           if (!res.ok) return;
           const comments = await res.json();
+          if (n !== currentVersion) return; // a later switch won the race
+          currentComments = comments;
           ccount.textContent = String(comments.length);
+          pushAnchors();
           if (drawer.classList.contains('open')) renderComments(comments);
-        } catch (e) { /* leave the last-known count in place */ }
+        } catch (e) { /* leave the last-known state in place */ }
       };
 
-      const openDrawer = (open) => {
+      function openDrawer(open) {
         drawer.classList.toggle('open', open);
         cbtn.classList.toggle('active', open);
         cbtn.setAttribute('aria-expanded', open ? 'true' : 'false');
         drawer.setAttribute('aria-hidden', open ? 'false' : 'true');
-        if (open) { cdrawerv.textContent = 'v' + currentVersion; refreshComments(currentVersion); }
-      };
+        if (open) { cdrawerv.textContent = 'v' + currentVersion; renderComments(currentComments); }
+      }
       cbtn.addEventListener('click', () => openDrawer(!drawer.classList.contains('open')));
       cclose.addEventListener('click', () => openDrawer(false));
+
+      // Show/hide the pending-anchor strip in the composer.
+      const setAnchorDraft = (sel) => {
+        pendingAnchor = sel;
+        if (sel && sel.quote) { canchorq.textContent = sel.quote; canchor.classList.add('show'); }
+        else { canchorq.textContent = ''; canchor.classList.remove('show'); }
+      };
+      canchorx.addEventListener('click', () => setAnchorDraft(null));
+
+      // The floating "Comment" button appears over a live selection in the frame.
+      addcomment.addEventListener('click', () => {
+        addcomment.classList.remove('show');
+        openDrawer(true);
+        setAnchorDraft(pendingSelection);
+        cinput.focus();
+      });
 
       composer.addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -302,26 +449,60 @@
         cerr.textContent = '';
         if (!body) { cerr.textContent = 'Comment can’t be empty.'; return; }
         cpost.disabled = true;
+        const payload = { body, version: currentVersion };
+        if (pendingAnchor && pendingAnchor.quote) {
+          payload.anchor = {
+            quote: pendingAnchor.quote, prefix: pendingAnchor.prefix || '', suffix: pendingAnchor.suffix || '',
+            start: pendingAnchor.start | 0, end: pendingAnchor.end | 0,
+          };
+        }
         try {
           const res = await fetch('/artifacts/' + encodeURIComponent(slug) + '/comments', {
             method: 'POST', credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ body, version: currentVersion }),
+            body: JSON.stringify(payload),
           });
-          if (res.ok) { cinput.value = ''; await refreshComments(currentVersion); }
+          if (res.ok) { cinput.value = ''; setAnchorDraft(null); await refreshComments(currentVersion); }
           else { cerr.textContent = res.status === 404 ? 'You can’t comment here.' : 'Couldn’t post. Try again.'; }
         } catch (e) { cerr.textContent = 'Couldn’t post. Try again.'; }
         finally { cpost.disabled = false; }
       });
 
-      // loadVersion swaps the iframe to version n's raw content (same sandbox).
-      // The spinner stays up until the new version has actually painted (the
-      // iframe's load event) so switching never flashes a blank white screen.
-      // It also re-pins the comments drawer + count to the newly-selected version.
+      // Messages from the sandboxed artifact frame. Validated by source + tag and
+      // used ONLY to position UI / label a draft — never for authorization.
+      window.addEventListener('message', (e) => {
+        if (e.source !== frame.contentWindow) return;
+        const d = e.data;
+        if (!d || d.source !== 'herenow') return;
+        if (d.type === 'hn-ready') { bridgeReady = true; toFrame('hn-anchors', { anchors: lastAnchors }); return; }
+        if (d.type === 'hn-selection' && d.rect) {
+          pendingSelection = { quote: String(d.quote || ''), prefix: String(d.prefix || ''),
+            suffix: String(d.suffix || ''), start: d.start | 0, end: d.end | 0 };
+          if (!pendingSelection.quote.trim()) { addcomment.classList.remove('show'); return; }
+          const fr = frame.getBoundingClientRect();
+          const x = fr.left + (d.rect.left || 0);
+          const y = fr.top + (d.rect.bottom || 0) + 8;
+          addcomment.style.left = Math.max(8, Math.min(x, window.innerWidth - 130)) + 'px';
+          addcomment.style.top = Math.max(56, Math.min(y, window.innerHeight - 44)) + 'px';
+          addcomment.classList.add('show');
+          return;
+        }
+        if (d.type === 'hn-selection-cleared') { pendingSelection = null; addcomment.classList.remove('show'); return; }
+        if (d.type === 'hn-focus' && d.id != null) { focusComment(String(d.id)); return; }
+      });
+
+      // loadVersion swaps the iframe to version n's raw content and injects the
+      // selection/highlight bridge. The spinner stays up until the new version has
+      // actually painted (the iframe's load event) so switching never flashes a
+      // blank screen. It also re-pins the drawer + count to the selected version.
       const loadVersion = async (n) => {
         show('loading');
         frame.style.display = 'none';
+        addcomment.classList.remove('show');
         currentVersion = n;
+        currentComments = [];
+        bridgeReady = false;
+        setAnchorDraft(null);
         cdrawerv.textContent = 'v' + n;
         try {
           const res = await fetch('/a/' + encodeURIComponent(slug) + '/v/' + n + '/raw', { credentials: 'same-origin' });
@@ -332,17 +513,15 @@
             frame.style.display = 'block';
             if (vswitch.classList.contains('show')) viewing.textContent = 'viewing v' + n;
           };
-          // Reveal on load; a fallback timer guards against a missed load event.
           let revealed = false;
           const once = () => { if (!revealed) { revealed = true; reveal(); } };
           frame.onload = once;
           setTimeout(once, 4000);
-          frame.srcdoc = html;
+          frame.srcdoc = html + BRIDGE;
         } catch (e) {
           show('error');
           return;
         }
-        // Refresh the comment count (and the open drawer) for this version.
         refreshComments(n);
       };
 
@@ -376,6 +555,12 @@
         show('error');
       }
     })();
+    // The BRIDGE string is defined above the IIFE. It is the only code that can
+    // read the selection inside the null-origin frame: it reports selections and
+    // highlight clicks to the shell over postMessage, and paints the anchor
+    // highlights the shell sends back via the CSS Custom Highlight API (no DOM
+    // mutation of the artifact). Its closing tag is split so it can't terminate
+    // this shell script early.
   </script>
 </body>
 </html>
