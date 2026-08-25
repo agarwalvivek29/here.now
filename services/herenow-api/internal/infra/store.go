@@ -25,6 +25,7 @@ type FileStore struct {
 	arts     map[string]*herenowv1.Artifact
 	grants   []*herenowv1.Grant
 	versions []*herenowv1.ArtifactVersion
+	comments []*herenowv1.Comment
 	last     string // chain head
 	seq      int64
 }
@@ -43,6 +44,7 @@ func NewFileStore(dir string) (*FileStore, error) {
 func (s *FileStore) artsPath() string     { return filepath.Join(s.dir, "artifacts.json") }
 func (s *FileStore) grantsPath() string   { return filepath.Join(s.dir, "grants.json") }
 func (s *FileStore) versionsPath() string { return filepath.Join(s.dir, "versions.json") }
+func (s *FileStore) commentsPath() string { return filepath.Join(s.dir, "comments.json") }
 func (s *FileStore) auditPath() string    { return filepath.Join(s.dir, "audit.log") }
 
 func (s *FileStore) load() error {
@@ -83,6 +85,19 @@ func (s *FileStore) load() error {
 				return err
 			}
 			s.versions = append(s.versions, v)
+		}
+	}
+	if b, err := os.ReadFile(s.commentsPath()); err == nil {
+		var raw []json.RawMessage
+		if err := json.Unmarshal(b, &raw); err != nil {
+			return err
+		}
+		for _, msg := range raw {
+			c := &herenowv1.Comment{}
+			if err := protojson.Unmarshal(msg, c); err != nil {
+				return err
+			}
+			s.comments = append(s.comments, c)
 		}
 	}
 	if b, err := os.ReadFile(s.auditPath()); err == nil {
@@ -254,6 +269,59 @@ func (s *FileStore) GetVersion(slug string, n int32) (*herenowv1.ArtifactVersion
 		}
 	}
 	return nil, false, nil
+}
+
+// AddComment appends one review comment and persists the comment list
+// atomically. Comments are collaboration content, never audited (ADR-0014).
+func (s *FileStore) AddComment(c *herenowv1.Comment) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.comments = append(s.comments, c)
+	return s.persistComments()
+}
+
+func (s *FileStore) persistComments() error {
+	out := make([]json.RawMessage, 0, len(s.comments))
+	for _, c := range s.comments {
+		b, err := protojson.Marshal(c)
+		if err != nil {
+			return err
+		}
+		out = append(out, b)
+	}
+	return writeJSON(s.commentsPath(), out)
+}
+
+// Comments returns every comment on slug, ascending by created_at (oldest
+// first). Callers filter by version at the handler layer.
+func (s *FileStore) Comments(slug string) ([]*herenowv1.Comment, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []*herenowv1.Comment
+	for _, c := range s.comments {
+		if c.GetSlug() == slug {
+			out = append(out, c)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].GetCreatedAt().AsTime().Before(out[j].GetCreatedAt().AsTime())
+	})
+	return out, nil
+}
+
+// ResolveComment marks the comment with the given id on slug as resolved and
+// persists the change. The bool reports whether such a comment was found (a
+// miss is not an error).
+func (s *FileStore) ResolveComment(slug, id string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, c := range s.comments {
+		if c.GetSlug() == slug && c.GetId() == id {
+			c.Resolved = true
+			return true, s.persistComments()
+		}
+	}
+	return false, nil
 }
 
 // Append writes one hash-chained, append-only audit row.

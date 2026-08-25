@@ -65,3 +65,19 @@ message Grant {
   string granted_by = 3;
   google.protobuf.Timestamp created_at = 4;
 }
+
+// Comment is one piece of review feedback on an artifact, pinned to the version
+// it was made on (ADR-0014). Anyone who can view the artifact may comment; only
+// the owner resolves. Comments are collaboration content, NOT access-control
+// events, so they are never written to the hash-chained audit trail. The body is
+// user content and MUST be rendered as text (never innerHTML) in the viewer.
+message Comment {
+  string id = 1;
+  string slug = 2;
+  int32 version = 3;
+  string author_sub = 4;
+  string author_email = 5;
+  google.protobuf.Timestamp created_at = 6;
+  string body = 7;
+  bool resolved = 8;
+}

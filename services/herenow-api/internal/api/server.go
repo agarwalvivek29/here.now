@@ -14,7 +14,9 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	herenowv1 "github.com/agarwalvivek29/here.now/packages/schema/generated/go/herenow/v1"
 	"github.com/agarwalvivek29/here.now/services/herenow-api/internal/domain"
@@ -35,6 +37,10 @@ type Store interface {
 	AddVersion(v *herenowv1.ArtifactVersion) error
 	Versions(slug string) ([]*herenowv1.ArtifactVersion, error)
 	GetVersion(slug string, n int32) (*herenowv1.ArtifactVersion, bool, error)
+	// Comments (ADR-0014): view-gated, version-pinned review feedback.
+	AddComment(c *herenowv1.Comment) error
+	Comments(slug string) ([]*herenowv1.Comment, error)
+	ResolveComment(slug, id string) (bool, error)
 	// Dashboard listings (FR18): Mine, Shared with me, and Org.
 	ListByOwner(sub string) ([]*herenowv1.Artifact, error)
 	ListByGrantee(sub string) ([]*herenowv1.Artifact, error)
@@ -110,6 +116,12 @@ func (s *Server) Routes() http.Handler {
 	// 404 that never distinguishes "missing" from "not yours".
 	mux.Handle("POST /artifacts/{slug}/grants", rateLimit(http.HandlerFunc(s.addGrant), contentPerMinute))
 	mux.Handle("PATCH /artifacts/{slug}/visibility", rateLimit(http.HandlerFunc(s.setVisibility), contentPerMinute))
+
+	// Comments (ADR-0014): view-gated create/list (anyone who CanView), owner-only
+	// resolve. Not audited — comments are collaboration content, not access events.
+	mux.Handle("POST /artifacts/{slug}/comments", rateLimit(http.HandlerFunc(s.addComment), contentPerMinute))
+	mux.Handle("GET /artifacts/{slug}/comments", rateLimit(http.HandlerFunc(s.listComments), contentPerMinute))
+	mux.Handle("POST /artifacts/{slug}/comments/{id}/resolve", rateLimit(http.HandlerFunc(s.resolveComment), contentPerMinute))
 	return mux
 }
 
@@ -686,6 +698,177 @@ func parseVisibility(s string) (herenowv1.Visibility, bool) {
 	default:
 		return herenowv1.Visibility_VISIBILITY_UNSPECIFIED, false
 	}
+}
+
+// maxCommentRunes caps a comment body so a single comment can't be used to
+// exhaust storage or the viewer. Measured in runes, not bytes.
+const maxCommentRunes = 4000
+
+// viewableArtifact runs the shared CanView gate for the comment read/create
+// endpoints: GetArtifact → Grants → CanView, fail closed with a not-leaking 404.
+// Unlike ownedArtifact it admits any authorized viewer (owner or grantee), which
+// is exactly who ADR-0014 lets comment. The returned bool reports whether the
+// caller may proceed; when false the response has already been written. Comment
+// endpoints are deliberately NOT audited (they are collaboration, not access).
+func (s *Server) viewableArtifact(w http.ResponseWriter, r *http.Request, slug string) (*herenowv1.Artifact, *herenowv1.Identity, bool) {
+	who, _ := s.Auth.Identify(r)
+	art, ok, err := s.Store.GetArtifact(slug)
+	if err != nil {
+		http.Error(w, "unavailable", http.StatusInternalServerError)
+		return nil, nil, false
+	}
+	if !ok {
+		http.NotFound(w, r) // don't leak existence
+		return nil, nil, false
+	}
+	grants, err := s.Store.Grants(slug)
+	if err != nil {
+		http.Error(w, "unavailable", http.StatusInternalServerError)
+		return nil, nil, false
+	}
+	if !domain.CanView(art, who, grants) {
+		http.NotFound(w, r) // forbidden and missing look identical
+		return nil, nil, false
+	}
+	return art, who, true
+}
+
+// commentView is the wire shape returned to clients. It deliberately omits
+// author_sub (the internal subject id) and slug (implied by the path).
+type commentView struct {
+	ID          string `json:"id"`
+	Version     int32  `json:"version"`
+	AuthorEmail string `json:"author_email"`
+	CreatedAt   string `json:"created_at,omitempty"`
+	Body        string `json:"body"`
+	Resolved    bool   `json:"resolved"`
+}
+
+func toCommentView(c *herenowv1.Comment) commentView {
+	cv := commentView{
+		ID:          c.GetId(),
+		Version:     c.GetVersion(),
+		AuthorEmail: c.GetAuthorEmail(),
+		Body:        c.GetBody(),
+		Resolved:    c.GetResolved(),
+	}
+	if c.GetCreatedAt() != nil {
+		cv.CreatedAt = c.GetCreatedAt().AsTime().UTC().Format(time.RFC3339)
+	}
+	return cv
+}
+
+// addComment (ADR-0014) records a review comment. View-gated: anyone who CanView
+// the artifact may comment (owner or invited grantee), so an unauthorized or
+// unknown artifact is a not-leaking 404. The body is JSON {body, version}: the
+// body is trimmed and must be non-empty (400) and at most maxCommentRunes (400);
+// version defaults to the artifact's latest_version when omitted or 0. The author
+// is taken from the session, never the client. Responds 201 with the comment.
+// Deliberately NOT audited (ADR-0014).
+func (s *Server) addComment(w http.ResponseWriter, r *http.Request) {
+	slug := r.PathValue("slug")
+	art, who, ok := s.viewableArtifact(w, r, slug)
+	if !ok {
+		return
+	}
+
+	var body struct {
+		Body    string `json:"body"`
+		Version int32  `json:"version"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	text := strings.TrimSpace(body.Body)
+	if text == "" {
+		http.Error(w, "empty comment", http.StatusBadRequest)
+		return
+	}
+	if utf8.RuneCountInString(text) > maxCommentRunes {
+		http.Error(w, "comment too long", http.StatusBadRequest)
+		return
+	}
+	version := body.Version
+	if version <= 0 {
+		version = art.GetLatestVersion()
+	}
+
+	c := &herenowv1.Comment{
+		Id:          domain.NewSlug(),
+		Slug:        slug,
+		Version:     version,
+		AuthorSub:   who.GetSub(),
+		AuthorEmail: who.GetEmail(),
+		CreatedAt:   timestamppb.Now(),
+		Body:        text,
+		Resolved:    false,
+	}
+	if err := s.Store.AddComment(c); err != nil {
+		http.Error(w, "unavailable", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(toCommentView(c))
+}
+
+// listComments (ADR-0014) returns an artifact's comments, ascending by
+// created_at, to any authorized viewer (not-leaking 404 otherwise). An optional
+// ?version=n filters to comments made on that version.
+func (s *Server) listComments(w http.ResponseWriter, r *http.Request) {
+	slug := r.PathValue("slug")
+	if _, _, ok := s.viewableArtifact(w, r, slug); !ok {
+		return
+	}
+
+	var filter int32 // 0 = all versions
+	if raw := r.URL.Query().Get("version"); raw != "" {
+		n, err := parseVersion(raw)
+		if err != nil {
+			http.Error(w, "bad version", http.StatusBadRequest)
+			return
+		}
+		filter = n
+	}
+
+	comments, err := s.Store.Comments(slug)
+	if err != nil {
+		http.Error(w, "unavailable", http.StatusInternalServerError)
+		return
+	}
+	out := make([]commentView, 0, len(comments))
+	for _, c := range comments {
+		if filter != 0 && c.GetVersion() != filter {
+			continue
+		}
+		out = append(out, toCommentView(c))
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(out)
+}
+
+// resolveComment (ADR-0014) marks a comment resolved. Owner-only via the same
+// fail-closed gate as the sharing endpoints (401 unauthenticated, 404 for a
+// non-owner or missing artifact). An unknown comment id is a 404. Responds 200.
+func (s *Server) resolveComment(w http.ResponseWriter, r *http.Request) {
+	slug := r.PathValue("slug")
+	if _, _, ok := s.ownedArtifact(w, r, slug); !ok {
+		return
+	}
+	id := r.PathValue("id")
+	found, err := s.Store.ResolveComment(slug, id)
+	if err != nil {
+		http.Error(w, "unavailable", http.StatusInternalServerError)
+		return
+	}
+	if !found {
+		http.NotFound(w, r)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
 }
 
 func (s *Server) audit(who *herenowv1.Identity, slug string, action herenowv1.AuditAction, allowed bool) {

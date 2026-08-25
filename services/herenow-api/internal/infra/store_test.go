@@ -2,8 +2,10 @@ package infra
 
 import (
 	"testing"
+	"time"
 
 	herenowv1 "github.com/agarwalvivek29/here.now/packages/schema/generated/go/herenow/v1"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // TestFileStoreRoundTrip verifies that metadata persisted by one FileStore is
@@ -126,6 +128,69 @@ func TestVersionRoundTrip(t *testing.T) {
 	// A version that does not exist is a clean miss, not an error.
 	if _, ok, err := reloaded.GetVersion("doc", 3); err != nil || ok {
 		t.Fatalf("GetVersion(doc,3): expected miss, ok=%v err=%v", ok, err)
+	}
+}
+
+// TestCommentRoundTrip verifies the comments store path (ADR-0014): comments
+// pinned to different versions round-trip, Comments returns them ascending by
+// created_at, ResolveComment flips resolved for the right id only, and all of it
+// reloads from disk into a fresh FileStore.
+func TestCommentRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+
+	s, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+
+	base := time.Now().UTC()
+	// Insert out of chronological order to prove Comments sorts by created_at.
+	seed := []*herenowv1.Comment{
+		{Id: "c-v2", Slug: "doc", Version: 2, AuthorSub: "u1", AuthorEmail: "u1@x", Body: "on v2", CreatedAt: timestamppb.New(base.Add(2 * time.Minute))},
+		{Id: "c-v1-a", Slug: "doc", Version: 1, AuthorSub: "u2", AuthorEmail: "u2@x", Body: "first on v1", CreatedAt: timestamppb.New(base)},
+		{Id: "c-v1-b", Slug: "doc", Version: 1, AuthorSub: "u1", AuthorEmail: "u1@x", Body: "second on v1", CreatedAt: timestamppb.New(base.Add(1 * time.Minute))},
+		{Id: "c-other", Slug: "other", Version: 1, AuthorSub: "u1", AuthorEmail: "u1@x", Body: "elsewhere", CreatedAt: timestamppb.New(base)},
+	}
+	for _, c := range seed {
+		if err := s.AddComment(c); err != nil {
+			t.Fatalf("AddComment(%s): %v", c.GetId(), err)
+		}
+	}
+
+	// Resolve one comment; the miss case must report found=false without error.
+	if found, err := s.ResolveComment("doc", "c-v1-a"); err != nil || !found {
+		t.Fatalf("ResolveComment(doc,c-v1-a): found=%v err=%v", found, err)
+	}
+	if found, err := s.ResolveComment("doc", "nope"); err != nil || found {
+		t.Fatalf("ResolveComment(doc,nope): expected miss, found=%v err=%v", found, err)
+	}
+
+	// Fresh store over the same dir must reload the comments from disk.
+	reloaded, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("reload NewFileStore: %v", err)
+	}
+
+	got, err := reloaded.Comments("doc")
+	if err != nil {
+		t.Fatalf("Comments: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("expected 3 comments for doc, got %d", len(got))
+	}
+	// Ascending by created_at, and 'other' never leaked in.
+	wantOrder := []string{"c-v1-a", "c-v1-b", "c-v2"}
+	for i, id := range wantOrder {
+		if got[i].GetId() != id {
+			t.Fatalf("comment order[%d]: got %q, want %q", i, got[i].GetId(), id)
+		}
+	}
+	// The resolved flag persisted for the right comment only.
+	for _, c := range got {
+		want := c.GetId() == "c-v1-a"
+		if c.GetResolved() != want {
+			t.Fatalf("resolved(%s): got %v, want %v", c.GetId(), c.GetResolved(), want)
+		}
 	}
 }
 
