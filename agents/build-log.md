@@ -67,3 +67,23 @@ sign-in · render-parity pipeline (esbuild, increment 1) · end-to-end flow test
   revealed a cross-origin-auth decision → user chose defer (C).
 - **2026-08-12** — Wave 5 (#15–#16): render bundle-at-publish increment 1 (fail-soft) + full
   e2e flow (no defects). **P0 build at finish line.** Render increment 2 awaits a real artifact.
+
+## Post-P0 feature waves (collaboration loop)
+
+- **Console redesign** (trusted-infra-console): sign-in, dashboard, viewer + quick wins
+  (preview cards, profile menu + `/logout`, icon copy). `artifacta-design` skill added
+  (skills/) for authoring artifacts.
+- **Versioning** (ADR-0013) — MERGED: PR #17 (backend+schema: immutable versions, blob keyed
+  (slug,n), `POST /artifacts/{slug}/versions`, `/a/{slug}/v/{n}/raw`, `GET /artifacts/{slug}`
+  metadata) + PR #18 (CLI `publish --update` + `versions`, viewer version switcher, dashboard
+  vN badge). Proven live: publish v1 → `--update` v2 → switcher flips between immutable versions.
+- **Next:** comments (pinned to version) → share/invite (invite-by-email, pending grant).
+
+## Findings
+
+- **F-3 (open) — legacy artifacts predate versioning.** Artifacts published before ADR-0013
+  have `latest_version=0` and their blob is at the old `<slug>.bundle` key, so post-upgrade
+  they 404 on view and `--update` starts at v1. Needs a one-time migration: backfill a v1
+  version record + rename `<slug>.bundle` → `<slug>.v1.bundle` + set latest_version=1. Non-issue
+  for greenfield deploys (no pre-versioning data); relevant only when upgrading an instance
+  that already has artifacts.
