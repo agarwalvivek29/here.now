@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 
 	herenowv1 "github.com/agarwalvivek29/here.now/packages/schema/generated/go/herenow/v1"
@@ -19,12 +20,13 @@ import (
 // an append-only, hash-chained JSONL file. Not for concurrent multi-process use —
 // Postgres is that adapter.
 type FileStore struct {
-	mu     sync.Mutex
-	dir    string
-	arts   map[string]*herenowv1.Artifact
-	grants []*herenowv1.Grant
-	last   string // chain head
-	seq    int64
+	mu       sync.Mutex
+	dir      string
+	arts     map[string]*herenowv1.Artifact
+	grants   []*herenowv1.Grant
+	versions []*herenowv1.ArtifactVersion
+	last     string // chain head
+	seq      int64
 }
 
 func NewFileStore(dir string) (*FileStore, error) {
@@ -38,9 +40,10 @@ func NewFileStore(dir string) (*FileStore, error) {
 	return s, nil
 }
 
-func (s *FileStore) artsPath() string   { return filepath.Join(s.dir, "artifacts.json") }
-func (s *FileStore) grantsPath() string { return filepath.Join(s.dir, "grants.json") }
-func (s *FileStore) auditPath() string  { return filepath.Join(s.dir, "audit.log") }
+func (s *FileStore) artsPath() string     { return filepath.Join(s.dir, "artifacts.json") }
+func (s *FileStore) grantsPath() string   { return filepath.Join(s.dir, "grants.json") }
+func (s *FileStore) versionsPath() string { return filepath.Join(s.dir, "versions.json") }
+func (s *FileStore) auditPath() string    { return filepath.Join(s.dir, "audit.log") }
 
 func (s *FileStore) load() error {
 	if b, err := os.ReadFile(s.artsPath()); err == nil {
@@ -67,6 +70,19 @@ func (s *FileStore) load() error {
 				return err
 			}
 			s.grants = append(s.grants, g)
+		}
+	}
+	if b, err := os.ReadFile(s.versionsPath()); err == nil {
+		var raw []json.RawMessage
+		if err := json.Unmarshal(b, &raw); err != nil {
+			return err
+		}
+		for _, msg := range raw {
+			v := &herenowv1.ArtifactVersion{}
+			if err := protojson.Unmarshal(msg, v); err != nil {
+				return err
+			}
+			s.versions = append(s.versions, v)
 		}
 	}
 	if b, err := os.ReadFile(s.auditPath()); err == nil {
@@ -190,6 +206,54 @@ func (s *FileStore) Grants(slug string) ([]*herenowv1.Grant, error) {
 		}
 	}
 	return out, nil
+}
+
+// AddVersion appends one immutable artifact version and persists the version
+// list atomically. Versions are never mutated or deleted (ADR-0013).
+func (s *FileStore) AddVersion(v *herenowv1.ArtifactVersion) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.versions = append(s.versions, v)
+	return s.persistVersions()
+}
+
+func (s *FileStore) persistVersions() error {
+	out := make([]json.RawMessage, 0, len(s.versions))
+	for _, v := range s.versions {
+		b, err := protojson.Marshal(v)
+		if err != nil {
+			return err
+		}
+		out = append(out, b)
+	}
+	return writeJSON(s.versionsPath(), out)
+}
+
+// Versions returns every version of slug, ascending by version number n.
+func (s *FileStore) Versions(slug string) ([]*herenowv1.ArtifactVersion, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []*herenowv1.ArtifactVersion
+	for _, v := range s.versions {
+		if v.GetSlug() == slug {
+			out = append(out, v)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].GetN() < out[j].GetN() })
+	return out, nil
+}
+
+// GetVersion returns version n of slug. The bool is false when no such version
+// exists (missing, not an error).
+func (s *FileStore) GetVersion(slug string, n int32) (*herenowv1.ArtifactVersion, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, v := range s.versions {
+		if v.GetSlug() == slug && v.GetN() == n {
+			return v, true, nil
+		}
+	}
+	return nil, false, nil
 }
 
 // Append writes one hash-chained, append-only audit row.

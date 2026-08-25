@@ -27,8 +27,10 @@ message Identity {
   string email = 2;
 }
 
-// Artifact is the metadata for one published bundle. Bundle bytes live in the
-// blob store; this is what the metadata store persists.
+// Artifact is the container for one published document. It holds the metadata
+// shared across versions (slug, owner, title, visibility) and points at the most
+// recently appended version. Bundle bytes for each version live in the blob
+// store, keyed by (slug, n); this is what the metadata store persists.
 message Artifact {
   string slug = 1;
   string owner_sub = 2;
@@ -36,6 +38,24 @@ message Artifact {
   Visibility visibility = 4;
   string content_type = 5;
   google.protobuf.Timestamp created_at = 6;
+  // latest_version is the highest version number that exists for this artifact
+  // (1-based). /a/{slug}/raw serves this version.
+  int32 latest_version = 7;
+}
+
+// ArtifactVersion is one immutable revision of an artifact's bundle. Versions are
+// never mutated or deleted in normal operation: publishing an update appends a
+// new version rather than overwriting. Access is per-artifact (versions inherit
+// the artifact's visibility/grants), so a version carries no visibility of its
+// own. See ADR-0013.
+message ArtifactVersion {
+  string slug = 1;
+  // n is the 1-based version number, unique and ascending within a slug.
+  int32 n = 2;
+  string content_type = 3;
+  google.protobuf.Timestamp created_at = 4;
+  string created_by = 5;
+  string note = 6;
 }
 
 // Grant is one invitee's access to one artifact (the many-to-many relation).

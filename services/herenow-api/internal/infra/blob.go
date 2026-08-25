@@ -5,6 +5,7 @@
 package infra
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 
 // BlobFS is a filesystem-backed blob store. Bytes are returned only after the
 // API layer's authorization allow — the store itself makes no access decisions.
+// Each bundle is one immutable version, keyed by (slug, n) (ADR-0013).
 type BlobFS struct{ dir string }
 
 func NewBlobFS(dir string) (*BlobFS, error) {
@@ -21,11 +23,15 @@ func NewBlobFS(dir string) (*BlobFS, error) {
 	return &BlobFS{dir: dir}, nil
 }
 
-func (b *BlobFS) path(slug string) string { return filepath.Join(b.dir, slug+".bundle") }
+// path is the on-disk name for one version's bundle: "<slug>.v<n>.bundle".
+func (b *BlobFS) path(slug string, n int32) string {
+	return filepath.Join(b.dir, fmt.Sprintf("%s.v%d.bundle", slug, n))
+}
 
-// Put streams r into the blob file, never buffering the whole payload in memory.
-func (b *BlobFS) Put(slug string, r io.Reader) error {
-	f, err := os.OpenFile(b.path(slug), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+// Put streams r into the blob file for version n, never buffering the whole
+// payload in memory.
+func (b *BlobFS) Put(slug string, n int32, r io.Reader) error {
+	f, err := os.OpenFile(b.path(slug, n), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
 	}
@@ -36,7 +42,7 @@ func (b *BlobFS) Put(slug string, r io.Reader) error {
 	return f.Close()
 }
 
-// Get opens the blob for streaming; the caller owns closing the reader.
-func (b *BlobFS) Get(slug string) (io.ReadCloser, error) {
-	return os.Open(b.path(slug))
+// Get opens version n's blob for streaming; the caller owns closing the reader.
+func (b *BlobFS) Get(slug string, n int32) (io.ReadCloser, error) {
+	return os.Open(b.path(slug, n))
 }
