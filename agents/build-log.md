@@ -95,6 +95,12 @@ sign-in · render-parity pipeline (esbuild, increment 1) · end-to-end flow test
   highlight⇄comment. Inbound frame messages are display-only (validated by source, never authz).
   Proven live: user selected text on the SRE-agent artifact and left an anchored comment with
   correct computed offsets; seeded quote "contains customer PII" highlights in the cohort report.
+- **Comment threads / replies** (ADR-0016) — same branch/PR #20. A reply = a comment with
+  `parent_id` (reuses the create/list/store path; no new type/route). One level only
+  (reply-to-reply → 400); replies inherit the root's version, are never anchored; resolve is
+  thread-level (root only; reply/unknown id → 404); count in the bar = threads (roots). Viewer
+  groups roots + replies into conversations with an inline Reply box. Tests: `TestReplyThread`.
+  Proven live: posted a reply through the UI on the cohort report; thread refreshed in place.
 - **Next:** share/invite (invite-by-email, pending grant resolved at first SSO login).
 
 ## Findings

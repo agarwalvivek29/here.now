@@ -404,7 +404,11 @@ type Comment struct {
 	// Optional text anchor (ADR-0015). When set, the comment is anchored to a span
 	// of the artifact's text; when unset, it is a page-level note. Because version
 	// content is immutable, an anchor made on a version stays valid on it forever.
-	Anchor        *TextAnchor `protobuf:"bytes,9,opt,name=anchor,proto3" json:"anchor,omitempty"`
+	Anchor *TextAnchor `protobuf:"bytes,9,opt,name=anchor,proto3" json:"anchor,omitempty"`
+	// Optional parent comment id (ADR-0016). Empty = a root comment (a thread); set
+	// = a reply within that thread. Replies inherit the root's version, are never
+	// anchored, and are not resolved individually (the root resolves the thread).
+	ParentId      string `protobuf:"bytes,10,opt,name=parent_id,json=parentId,proto3" json:"parent_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -500,6 +504,13 @@ func (x *Comment) GetAnchor() *TextAnchor {
 		return x.Anchor
 	}
 	return nil
+}
+
+func (x *Comment) GetParentId() string {
+	if x != nil {
+		return x.ParentId
+	}
+	return ""
 }
 
 // TextAnchor locates a comment against a span of an artifact's rendered text
@@ -619,7 +630,7 @@ const file_herenow_v1_artifact_proto_rawDesc = "" +
 	"\n" +
 	"granted_by\x18\x03 \x01(\tR\tgrantedBy\x129\n" +
 	"\n" +
-	"created_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\"\xa4\x02\n" +
+	"created_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\"\xc1\x02\n" +
 	"\aComment\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04slug\x18\x02 \x01(\tR\x04slug\x12\x18\n" +
@@ -631,7 +642,9 @@ const file_herenow_v1_artifact_proto_rawDesc = "" +
 	"created_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12\x12\n" +
 	"\x04body\x18\a \x01(\tR\x04body\x12\x1a\n" +
 	"\bresolved\x18\b \x01(\bR\bresolved\x12.\n" +
-	"\x06anchor\x18\t \x01(\v2\x16.herenow.v1.TextAnchorR\x06anchor\"z\n" +
+	"\x06anchor\x18\t \x01(\v2\x16.herenow.v1.TextAnchorR\x06anchor\x12\x1b\n" +
+	"\tparent_id\x18\n" +
+	" \x01(\tR\bparentId\"z\n" +
 	"\n" +
 	"TextAnchor\x12\x14\n" +
 	"\x05quote\x18\x01 \x01(\tR\x05quote\x12\x16\n" +

@@ -322,3 +322,74 @@ func TestAddCommentAnchorRoundTrip(t *testing.T) {
 		t.Fatalf("want exactly 1 anchored comment in list, got %d (of %d)", anchored, len(list))
 	}
 }
+
+// TestReplyThread verifies threaded replies (ADR-0016): a reply carries its
+// parent_id, inherits the root's version, ignores an anchor, and can't parent
+// another reply; resolving a reply (or an unknown id) is a 404.
+func TestReplyThread(t *testing.T) {
+	dir := t.TempDir()
+	owner := &herenowv1.Identity{Sub: "local:owner", Email: "owner@localhost"}
+	srv := newTestServer(t, dir, fakeAuth{id: owner, ok: true})
+
+	// v1 then v2 so we can prove a reply inherits the ROOT's version, not latest.
+	slug := publishAs(t, srv.Routes(), "<h1>one</h1>")
+	req := httptest.NewRequest(http.MethodPost, "/artifacts/"+slug+"/versions", strings.NewReader("<h1>two</h1>"))
+	req.Header.Set("Content-Type", "text/plain; charset=utf-8")
+	rr := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rr, req)
+
+	// Root comment pinned to v1.
+	rr = postComment(t, srv, slug, `{"body":"root question","version":1}`)
+	var root commentView
+	_ = json.Unmarshal(rr.Body.Bytes(), &root)
+	if root.ID == "" || root.Version != 1 {
+		t.Fatalf("root: %+v, want version=1", root)
+	}
+
+	// Reply: parent_id set, version + anchor in the body are ignored (inherits v1,
+	// stays unanchored).
+	rr = postComment(t, srv, slug,
+		`{"body":"a reply","parent_id":"`+root.ID+`","version":2,"anchor":{"quote":"x"}}`)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("reply: got %d, want 201 (body %q)", rr.Code, rr.Body.String())
+	}
+	var reply commentView
+	_ = json.Unmarshal(rr.Body.Bytes(), &reply)
+	if reply.ParentID != root.ID {
+		t.Fatalf("reply parent_id = %q, want %q", reply.ParentID, root.ID)
+	}
+	if reply.Version != 1 {
+		t.Fatalf("reply version = %d, want 1 (inherit root)", reply.Version)
+	}
+	if reply.Anchor != nil {
+		t.Fatalf("reply should never be anchored, got %+v", reply.Anchor)
+	}
+
+	// A reply can't parent another reply (one level only) → 400.
+	rr = postComment(t, srv, slug, `{"body":"nested","parent_id":"`+reply.ID+`"}`)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("reply-to-reply: got %d, want 400", rr.Code)
+	}
+
+	// Unknown parent → 400.
+	rr = postComment(t, srv, slug, `{"body":"orphan","parent_id":"nope"}`)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("unknown parent: got %d, want 400", rr.Code)
+	}
+
+	// Resolving a reply is a 404 (resolve applies to threads/roots only).
+	req = httptest.NewRequest(http.MethodPost, "/artifacts/"+slug+"/comments/"+reply.ID+"/resolve", nil)
+	rr = httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("resolve reply: got %d, want 404", rr.Code)
+	}
+
+	// Resolving the root works.
+	req = httptest.NewRequest(http.MethodPost, "/artifacts/"+slug+"/comments/"+root.ID+"/resolve", nil)
+	rr = httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("resolve root: got %d, want 200", rr.Code)
+	}
+}

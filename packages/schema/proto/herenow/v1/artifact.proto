@@ -84,6 +84,10 @@ message Comment {
   // of the artifact's text; when unset, it is a page-level note. Because version
   // content is immutable, an anchor made on a version stays valid on it forever.
   TextAnchor anchor = 9;
+  // Optional parent comment id (ADR-0016). Empty = a root comment (a thread); set
+  // = a reply within that thread. Replies inherit the root's version, are never
+  // anchored, and are not resolved individually (the root resolves the thread).
+  string parent_id = 10;
 }
 
 // TextAnchor locates a comment against a span of an artifact's rendered text
