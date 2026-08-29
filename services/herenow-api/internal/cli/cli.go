@@ -183,7 +183,7 @@ func loginOIDC(c config.Config) error {
 
 	srv := &http.Server{Handler: mux}
 	go func() { _ = srv.Serve(ln) }()
-	defer srv.Shutdown(context.Background())
+	defer func() { _ = srv.Shutdown(context.Background()) }()
 
 	authURL := oauthCfg.AuthCodeURL(state, oauth2.AccessTypeOnline, oauth2.S256ChallengeOption(pkce))
 	fmt.Printf("opening browser to log in:\n  %s\n", authURL)

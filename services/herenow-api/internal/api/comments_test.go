@@ -246,3 +246,150 @@ func TestResolveCommentUnauthenticated(t *testing.T) {
 		t.Fatalf("anon resolve: got %d, want 401", rr.Code)
 	}
 }
+
+// TestAddCommentAnchorRoundTrip verifies a text anchor (ADR-0015) is stored on
+// create, echoed back, and returned by list — and that an over-cap quote
+// gracefully degrades to a page-level note rather than being rejected.
+func TestAddCommentAnchorRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	owner := &herenowv1.Identity{Sub: "local:owner", Email: "owner@localhost"}
+	srv := newTestServer(t, dir, fakeAuth{id: owner, ok: true})
+	slug := publishAs(t, srv.Routes(), "<p>the quick brown fox jumps</p>")
+
+	// Anchored comment: the anchor should round-trip verbatim.
+	rr := postComment(t, srv, slug,
+		`{"body":"why brown?","anchor":{"quote":"brown fox","prefix":"quick ","suffix":" jumps","start":10,"end":19}}`)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("anchored comment: got %d, want 201 (body %q)", rr.Code, rr.Body.String())
+	}
+	var got commentView
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Anchor == nil {
+		t.Fatalf("anchor missing in create response: %+v", got)
+	}
+	if got.Anchor.Quote != "brown fox" || got.Anchor.Prefix != "quick " || got.Anchor.Suffix != " jumps" ||
+		got.Anchor.Start != 10 || got.Anchor.End != 19 {
+		t.Fatalf("anchor mismatch: %+v", got.Anchor)
+	}
+
+	// A comment with no anchor is a page-level note (anchor omitted).
+	rr = postComment(t, srv, slug, `{"body":"general note"}`)
+	var pageLevel commentView
+	if err := json.Unmarshal(rr.Body.Bytes(), &pageLevel); err != nil {
+		t.Fatalf("decode page-level: %v", err)
+	}
+	if pageLevel.Anchor != nil {
+		t.Fatalf("page-level comment should have no anchor, got %+v", pageLevel.Anchor)
+	}
+
+	// An over-cap quote degrades to a page-level note (201, anchor dropped).
+	huge := strings.Repeat("x", maxQuoteRunes+1)
+	rr = postComment(t, srv, slug, `{"body":"big","anchor":{"quote":"`+huge+`"}}`)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("over-cap quote: got %d, want 201", rr.Code)
+	}
+	var overCap commentView
+	if err := json.Unmarshal(rr.Body.Bytes(), &overCap); err != nil {
+		t.Fatalf("decode over-cap: %v", err)
+	}
+	if overCap.Anchor != nil {
+		t.Fatalf("over-cap quote should degrade to page-level, got anchor %+v", overCap.Anchor)
+	}
+
+	// List returns the anchored comment with its anchor intact.
+	req := httptest.NewRequest(http.MethodGet, "/artifacts/"+slug+"/comments", nil)
+	rr = httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("list: got %d, want 200", rr.Code)
+	}
+	var list []commentView
+	if err := json.Unmarshal(rr.Body.Bytes(), &list); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	anchored := 0
+	for _, c := range list {
+		if c.Anchor != nil {
+			anchored++
+			if c.Anchor.Quote != "brown fox" {
+				t.Fatalf("listed anchor quote = %q, want %q", c.Anchor.Quote, "brown fox")
+			}
+		}
+	}
+	if anchored != 1 {
+		t.Fatalf("want exactly 1 anchored comment in list, got %d (of %d)", anchored, len(list))
+	}
+}
+
+// TestReplyThread verifies threaded replies (ADR-0016): a reply carries its
+// parent_id, inherits the root's version, ignores an anchor, and can't parent
+// another reply; resolving a reply (or an unknown id) is a 404.
+func TestReplyThread(t *testing.T) {
+	dir := t.TempDir()
+	owner := &herenowv1.Identity{Sub: "local:owner", Email: "owner@localhost"}
+	srv := newTestServer(t, dir, fakeAuth{id: owner, ok: true})
+
+	// v1 then v2 so we can prove a reply inherits the ROOT's version, not latest.
+	slug := publishAs(t, srv.Routes(), "<h1>one</h1>")
+	req := httptest.NewRequest(http.MethodPost, "/artifacts/"+slug+"/versions", strings.NewReader("<h1>two</h1>"))
+	req.Header.Set("Content-Type", "text/plain; charset=utf-8")
+	rr := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rr, req)
+
+	// Root comment pinned to v1.
+	rr = postComment(t, srv, slug, `{"body":"root question","version":1}`)
+	var root commentView
+	_ = json.Unmarshal(rr.Body.Bytes(), &root)
+	if root.ID == "" || root.Version != 1 {
+		t.Fatalf("root: %+v, want version=1", root)
+	}
+
+	// Reply: parent_id set, version + anchor in the body are ignored (inherits v1,
+	// stays unanchored).
+	rr = postComment(t, srv, slug,
+		`{"body":"a reply","parent_id":"`+root.ID+`","version":2,"anchor":{"quote":"x"}}`)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("reply: got %d, want 201 (body %q)", rr.Code, rr.Body.String())
+	}
+	var reply commentView
+	_ = json.Unmarshal(rr.Body.Bytes(), &reply)
+	if reply.ParentID != root.ID {
+		t.Fatalf("reply parent_id = %q, want %q", reply.ParentID, root.ID)
+	}
+	if reply.Version != 1 {
+		t.Fatalf("reply version = %d, want 1 (inherit root)", reply.Version)
+	}
+	if reply.Anchor != nil {
+		t.Fatalf("reply should never be anchored, got %+v", reply.Anchor)
+	}
+
+	// A reply can't parent another reply (one level only) → 400.
+	rr = postComment(t, srv, slug, `{"body":"nested","parent_id":"`+reply.ID+`"}`)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("reply-to-reply: got %d, want 400", rr.Code)
+	}
+
+	// Unknown parent → 400.
+	rr = postComment(t, srv, slug, `{"body":"orphan","parent_id":"nope"}`)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("unknown parent: got %d, want 400", rr.Code)
+	}
+
+	// Resolving a reply is a 404 (resolve applies to threads/roots only).
+	req = httptest.NewRequest(http.MethodPost, "/artifacts/"+slug+"/comments/"+reply.ID+"/resolve", nil)
+	rr = httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("resolve reply: got %d, want 404", rr.Code)
+	}
+
+	// Resolving the root works.
+	req = httptest.NewRequest(http.MethodPost, "/artifacts/"+slug+"/comments/"+root.ID+"/resolve", nil)
+	rr = httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("resolve root: got %d, want 200", rr.Code)
+	}
+}

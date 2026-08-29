@@ -77,7 +77,31 @@ sign-in · render-parity pipeline (esbuild, increment 1) · end-to-end flow test
   (slug,n), `POST /artifacts/{slug}/versions`, `/a/{slug}/v/{n}/raw`, `GET /artifacts/{slug}`
   metadata) + PR #18 (CLI `publish --update` + `versions`, viewer version switcher, dashboard
   vN badge). Proven live: publish v1 → `--update` v2 → switcher flips between immutable versions.
-- **Next:** comments (pinned to version) → share/invite (invite-by-email, pending grant).
+- **Comments** (ADR-0014) — MERGED: PR #19. Proto `Comment`, `comments.json` store,
+  `POST/GET /artifacts/{slug}/comments` (CanView-gated, author from session, version defaults
+  to latest) + owner-only `POST .../{id}/resolve`. Viewer comments drawer (version-pinned,
+  owner Resolve, all bodies rendered via textContent/createElement — no innerHTML). Proven live:
+  bob (invited recipient) commented on the cohort report v2 → alice replied → owner resolved
+  bob's note (green `resolved` pill); anon list → 404 not-leak.
+- **Anchored comments** (ADR-0015) — on branch `feat/anchored-comments` (awaiting user UX
+  sign-off before merge). Comment on selected text, Notion-style. Schema: `TextAnchor` +
+  `Comment.anchor` (optional → unanchored = page-level note; both allowed). No store change
+  (protojson auto-persists). Server: anchor decoded/validated in `addComment` (quote cap 2000
+  runes → over-cap degrades to page-level; context clamped 64), echoed via `commentView`.
+  Viewer: a postMessage BRIDGE injected into the sandboxed frame (the only code that can read
+  the null-origin selection) reports selections + highlight clicks and paints anchor highlights
+  via the CSS Custom Highlight API (no DOM mutation); shell shows a floating ＋Comment over a
+  selection, a quote strip in the composer + each anchored comment, and cross-links
+  highlight⇄comment. Inbound frame messages are display-only (validated by source, never authz).
+  Proven live: user selected text on the SRE-agent artifact and left an anchored comment with
+  correct computed offsets; seeded quote "contains customer PII" highlights in the cohort report.
+- **Comment threads / replies** (ADR-0016) — same branch/PR #20. A reply = a comment with
+  `parent_id` (reuses the create/list/store path; no new type/route). One level only
+  (reply-to-reply → 400); replies inherit the root's version, are never anchored; resolve is
+  thread-level (root only; reply/unknown id → 404); count in the bar = threads (roots). Viewer
+  groups roots + replies into conversations with an inline Reply box. Tests: `TestReplyThread`.
+  Proven live: posted a reply through the UI on the cohort report; thread refreshed in place.
+- **Next:** share/invite (invite-by-email, pending grant resolved at first SSO login).
 
 ## Findings
 

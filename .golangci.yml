@@ -1,0 +1,11 @@
+# golangci-lint v2 config. The repo runs on a bleeding-edge Go, so v2 is required
+# (v1's bundled type-checker can't read the newer export data).
+version: "2"
+
+linters:
+  # Default linters (errcheck, govet, ineffassign, staticcheck, unused) stay on.
+  exclusions:
+    # Idiomatic unchecked errors — deferred Close(), Fprintln to stdout/stderr,
+    # etc. v1 excluded these by default; v2 requires opting in.
+    presets:
+      - std-error-handling

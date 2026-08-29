@@ -80,4 +80,25 @@ message Comment {
   google.protobuf.Timestamp created_at = 6;
   string body = 7;
   bool resolved = 8;
+  // Optional text anchor (ADR-0015). When set, the comment is anchored to a span
+  // of the artifact's text; when unset, it is a page-level note. Because version
+  // content is immutable, an anchor made on a version stays valid on it forever.
+  TextAnchor anchor = 9;
+  // Optional parent comment id (ADR-0016). Empty = a root comment (a thread); set
+  // = a reply within that thread. Replies inherit the root's version, are never
+  // anchored, and are not resolved individually (the root resolves the thread).
+  string parent_id = 10;
+}
+
+// TextAnchor locates a comment against a span of an artifact's rendered text
+// (ADR-0015), W3C-annotation style: a content quote (never a DOM path), a little
+// surrounding context to disambiguate repeats, and a character-offset fast path.
+// It is display metadata resolved client-side in the sandboxed viewer; the server
+// stores it verbatim and never trusts it for authorization.
+message TextAnchor {
+  string quote = 1;   // the exact selected text
+  string prefix = 2;  // a few characters immediately before the quote
+  string suffix = 3;  // a few characters immediately after the quote
+  int32 start = 4;    // char offset of the quote into the document's text content
+  int32 end = 5;      // char offset just past the quote
 }
