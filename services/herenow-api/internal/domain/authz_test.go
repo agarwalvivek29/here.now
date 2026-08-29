@@ -105,7 +105,11 @@ func TestNewSlug(t *testing.T) {
 }
 
 func TestNewSlug_unique(t *testing.T) {
-	if NewSlug() == NewSlug() {
+	// Two separate calls, compared via variables: NewSlug is random, so this is a
+	// real uniqueness check (not the identical-expression pattern staticcheck warns
+	// about when both sides are written inline).
+	a, b := NewSlug(), NewSlug()
+	if a == b {
 		t.Error("two successive NewSlug() calls returned the same value")
 	}
 }

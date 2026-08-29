@@ -89,16 +89,15 @@ jobs:
         with:
           go-version: stable
           cache: true
+      # Install golangci-lint v2 from source with the runner's Go. v2 is required:
+      # v1's bundled type-checker can't read go 1.27 export data, and building from
+      # source makes the tool's Go version match the toolchain. Run from the module
+      # dir (./... doesn't resolve from the non-module workspace root).
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest
-          # Build golangci-lint from source with the runner's Go so its build
-          # version matches the modules' go directive (a prebuilt binary is built
-          # with an older Go and refuses a newer target). Lint the module, not the
-          # workspace root (./... doesn't resolve from a non-module root).
-          install-mode: goinstall
-          working-directory: services/herenow-api
+        working-directory: services/herenow-api
+        run: |
+          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+          golangci-lint run ./...
 
   # ─── Rust ─────────────────────────────────────────────────────────────────
   lint-rust:
